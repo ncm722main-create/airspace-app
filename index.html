@@ -1218,7 +1218,7 @@ function segmentMaybeHits(as, acLat, acLon, hdgR, maxNm, cosLat, marginDeg){
 // ── PERF: per-frame "nearby airspace" filter ──
 // Built once per loop() tick, reused by every airspace scan so we iterate
 // 5–10 airspaces instead of 50–200. Cutoff is the max probe distance any
-// subsystem uses (~60nm for profile, 50nm for getAirspaceAhead, bevRangeNm).
+// subsystem uses (~60nm for profile, 50nm for getAirspaceAhead, bevRangeNm up to 100nm).
 let _nearbyAS = [];
 let _nearbyASFrame = -1;
 function rebuildNearbyAS(){
@@ -1226,8 +1226,8 @@ function rebuildNearbyAS(){
   _nearbyASFrame = _frameCount;
   _nearbyAS.length = 0;
   const cosLat = ac._cosLatR;
-  // ~70nm radius in degrees (lat) and per-cosLat (lon)
-  const cutoffLatDeg = 70/60;
+  // ~120nm radius in degrees (lat) — covers 100nm BEV + margin
+  const cutoffLatDeg = 120/60;
   const cutoffLonDeg = cutoffLatDeg/Math.max(0.1, cosLat);
   for(let i=0;i<AIRSPACE_DATA.length;i++){
     const as = AIRSPACE_DATA[i];
@@ -1282,6 +1282,7 @@ function shouldUpdate(key, intervalMs){
 let _cachedAirspaceAhead = null;
 let _cachedVerticalAirspace = null;
 let _cachedCurrentAirspace = [];
+const _insideSet = new Set(); // reused each frame to avoid GC
 
 // ═══════════════════════════════════════════════════════════
 // CONSTANTS
@@ -2840,7 +2841,7 @@ async function showAirportPopup(ap){
           const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
         }
         const ratio = Math.pow(2, dy/window.innerHeight*2);
-        bevRangeNm = Math.max(2, Math.min(60, rangeStart*ratio));
+        bevRangeNm = Math.max(2, Math.min(100, rangeStart*ratio));
       }
     }
   }, {passive:false});
@@ -2868,7 +2869,7 @@ async function showAirportPopup(ap){
       bevAutoRange = false;
       const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
     }
-    bevRangeNm = Math.max(2, Math.min(60, bevRangeNm + e.deltaY*0.05));
+    bevRangeNm = Math.max(2, Math.min(100, bevRangeNm + e.deltaY*0.05));
   }, {passive:false});
 })();
 
@@ -3477,12 +3478,12 @@ function drawAltTape(){
   if(_altStale){
     _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastT=_altNow;
     const hits = [];
-    for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
-      const as = AIRSPACE_DATA[_i];
+    for(let _i = 0; _i < _nearbyAS.length; _i++){
+      const as = _nearbyAS[_i];
       if(!asClassVisible[as.c]) continue;
       if(as.c === 'E') continue;
-      if(pointInPolyAC(_i, as)){
-        hits.push({idx: _i});
+      if(pointInPolyAC(as._idx, as)){
+        hits.push({idx: as._idx});
       }
     }
     _altC.hits = hits;
@@ -3688,8 +3689,9 @@ function drawAltTape(){
         const distDeg = (nm*1852)/111320;
         const pLat = ac.lat + Math.cos(_fwdHdgR)*distDeg;
         const pLon = ac.lon + Math.sin(_fwdHdgR)*distDeg/_fwdCosLat;
-        for(let _fi=0; _fi<AIRSPACE_DATA.length; _fi++){
-          const as = AIRSPACE_DATA[_fi];
+        for(let _ni=0; _ni<_nearbyAS.length; _ni++){
+          const as = _nearbyAS[_ni];
+          const _fi = as._idx;
           if(!asClassVisible[as.c]) continue;
           if(as.t + clearanceFt < scanBotFt || as.b - clearanceFt > scanTopFt) continue;
           if(pointInPolyAC(_fi, as) && aft >= as.b && aft <= as.t) continue;
@@ -3883,7 +3885,7 @@ function drawRangeBar(){
       for(const as of _nearbyAS){
         if(!asClassVisible[as.c]) continue;
         if(aft < (as.b - clearanceFt) || aft > (as.t + clearanceFt)) continue;
-        if(pointInPoly(ac.lat,ac.lon,as.p)) continue;
+        if(pointInPolyAC(as._idx, as)) continue;
         if(pointInPoly(pLat,pLon,as.p)) return {as, nm};
       }
     }
@@ -4029,8 +4031,9 @@ function drawHdgTape(){
     // Build candidates — same altitude + buffer altitude
     // Per-airspace logic: actual same-alt → solid; any buffer → hatched
     const cand = [];
-    for(let ai = 0; ai < AIRSPACE_DATA.length; ai++){
-      const as = AIRSPACE_DATA[ai];
+    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
+      const as = _nearbyAS[_ni];
+      const ai = as._idx;
       if(!asClassVisible[as.c]) continue;
       // Include same altitude AND vertical buffer altitude
       if(aft < (as.b - clearanceFt) || aft > (as.t + clearanceFt)) continue;
@@ -4222,9 +4225,10 @@ function drawHdgTape(){
       const bw = Math.max(x2-x1, 2) + 1;
       const bx = x1 - 0.5;
       const pri = isR ? 2 : isY ? 1 : 0;
+      const _isAlert = isR || isY;
       if(a.tier === 1){
         // Tier 1: actual same-altitude — solid fill
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, pri});
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, pri, _alert:_isAlert});
       } else {
         // Tier 2: buffer — chevrons indicating horizontal escape direction
         if(a.owner.atSameAlt){
@@ -4240,7 +4244,7 @@ function drawHdgTape(){
             drawX = bx;
             drawW = Math.max(bx + bw, centerX) - bx;
           }
-          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, pri});
+          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, pri, _alert:_isAlert});
         } else {
           // Buffer-altitude airspace — split at center bearing, chevrons point outward
           const cRel = a.centerBrg - hdg + shift;
@@ -4249,13 +4253,13 @@ function drawHdgTape(){
           // Left half: chevrons point left (away from center)
           if(centerX > barLeft){
             const leftW = Math.min(centerX, barRight) - barLeft;
-            if(leftW > 1) hdgHatch.push({x:barLeft, w:leftW, clipX:barLeft, clipW:leftW, col:a.col, dir:'left', pri});
+            if(leftW > 1) hdgHatch.push({x:barLeft, w:leftW, clipX:barLeft, clipW:leftW, col:a.col, dir:'left', pri, _alert:_isAlert});
           }
           // Right half: chevrons point right (away from center)
           if(centerX < barRight){
             const rightX = Math.max(centerX, barLeft);
             const rightW = barRight - rightX;
-            if(rightW > 1) hdgHatch.push({x:rightX, w:rightW, clipX:rightX, clipW:rightW, col:a.col, dir:'right', pri});
+            if(rightW > 1) hdgHatch.push({x:rightX, w:rightW, clipX:rightX, clipW:rightW, col:a.col, dir:'right', pri, _alert:_isAlert});
           }
         }
       }
@@ -4274,8 +4278,10 @@ function drawHdgTape(){
   hdgSolid.sort(priSort);
   hdgOverlays.sort(priSort);
 
-  // ── Draw: hatched first (clipped to buffer bounds), solid on top, then alert overlays ──
+  // ── Draw: non-alert bars first, then alert bars + overlays on top ──
+  // Pass 1: non-alert hatched bars
   for(const bar of hdgHatch){
+    if(bar._alert) continue;
     h.save();
     h.beginPath();
     h.rect(bar.clipX, barY, bar.clipW, barH);
@@ -4283,11 +4289,31 @@ function drawHdgTape(){
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
     h.restore();
   }
+  // Pass 1: non-alert solid bars
   for(const bar of hdgSolid){
+    if(bar._alert) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
   }
+  // Pass 2: alert hatched bars (drawn on top)
+  for(const bar of hdgHatch){
+    if(!bar._alert) continue;
+    h.save();
+    h.beginPath();
+    h.rect(bar.clipX, barY, bar.clipW, barH);
+    h.clip();
+    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
+    h.restore();
+  }
+  // Pass 2: alert solid bars (drawn on top)
+  for(const bar of hdgSolid){
+    if(!bar._alert) continue;
+    h.fillStyle = bar.col; h.globalAlpha = bar.a;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  // Pass 3: alert overlays (highest z — always on top of everything)
   for(const bar of hdgOverlays){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
@@ -5181,7 +5207,7 @@ function drawProfile(){
   }
   // MIN label at left edge
   tk+='<div style="position:absolute;left:2px;top:3px;font:9px var(--mono);color:rgba(255,255,255,.5);pointer-events:none;letter-spacing:.05em">MIN</div>';
-  tb.innerHTML=tk;
+  if(!drawProfile._lastTime||window._frameNow-drawProfile._lastTime>100){tb.innerHTML=tk;drawProfile._lastTime=window._frameNow;}
 }
 
 // ── HORIZON LINE ──────────────────────────────────────────
@@ -5697,7 +5723,7 @@ function drawBirdsEye(){
     bevRangeNm = calcAutoProfileRange();
   }
   // Manual zoom clamp — pinch/wheel allowed between 2 and 60 nm
-  bevRangeNm = Math.max(2, Math.min(60, bevRangeNm));
+  bevRangeNm = Math.max(2, Math.min(100, bevRangeNm));
   const scale = (roseR - bandW) / bevRangeNm; // nm to px within thickest band
 
   function toScreen(lat, lon){
@@ -6261,7 +6287,7 @@ function drawHudVSbar(){
       if(!asClassVisible[as.c]) continue;
       if(as.c==='E') continue;
       if(_vsMaxFwd(as) < 0) continue; // entirely behind aircraft
-      if(pointInPoly(ac.lat,ac.lon,as.p)) continue;
+      if(pointInPolyAC(as._idx, as)) continue;
       if(!pointInPoly(pLat,pLon,as.p)) continue;
       const inActualAlt = (aft >= as.b && aft <= as.t);
       const inBufAlt = !inActualAlt && (aft >= (as.b - clearanceFt) && aft <= (as.t + clearanceFt));
@@ -6674,19 +6700,21 @@ function loop(){
 
   updateCamera();
   // In solid mode, hide sectors the aircraft is currently inside
-  if(asRenderMode === 'wire' && typeof kmlGroup !== 'undefined'){
-    const insideSet = new Set();
+  // Throttled to 4Hz — visibility doesn't need 60fps updates
+  if(asRenderMode === 'wire' && typeof kmlGroup !== 'undefined' && shouldUpdate('insideSet', 250)){
     const aft = simMode ? simAltFt : ac.altM/FT_M;
-    for(let i = 0; i < AIRSPACE_DATA.length; i++){
-      const as = AIRSPACE_DATA[i];
-      if(aft >= as.b && aft <= as.t && pointInPoly(ac.lat, ac.lon, as.p)){
-        insideSet.add(i);
+    // Reuse _nearbyAS + pointInPolyAC cache instead of scanning all AIRSPACE_DATA
+    _insideSet.clear();
+    for(let i=0; i<_nearbyAS.length; i++){
+      const as = _nearbyAS[i];
+      if(aft >= as.b && aft <= as.t && pointInPolyAC(as._idx, as)){
+        _insideSet.add(as._idx);
       }
     }
     kmlGroup.children.forEach(ch => {
       if(ch.userData.asIndex !== undefined && ch.isMesh){
         if(!asClassVisible[ch.userData.asClass]){ ch.visible = false; return; }
-        ch.visible = !insideSet.has(ch.userData.asIndex);
+        ch.visible = !_insideSet.has(ch.userData.asIndex);
       }
     });
   }
