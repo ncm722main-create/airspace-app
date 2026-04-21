@@ -296,8 +296,8 @@ html,body{
 .prow .k{color:var(--muted);}.prow .v{color:var(--txt);}
 .sbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:4px;
   background:rgba(255,255,255,.04);border:1px solid var(--bdr);color:var(--dim);
-  font-family:var(--mono);font-weight:500;font-size:10px;padding:6px 8px;border-radius:var(--radius-sm);
-  cursor:pointer;transition:all var(--transition-fast);white-space:nowrap;}
+  font-family:var(--mono);font-weight:500;font-size:10px;padding:4px 8px;border-radius:var(--radius-sm);
+  cursor:pointer;transition:all var(--transition-fast);white-space:nowrap;letter-spacing:.06em;}
 .sbtn:hover{background:rgba(255,255,255,.09);border-color:var(--bdrhi);color:var(--txt);}
 .sbtn:active{transform:scale(.97);background:rgba(255,255,255,.12);}
 .sbrow{display:flex;gap:5px;margin-top:5px;}
@@ -563,7 +563,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
   .topbar-desktop{ display:none!important; }
   .settings-mobile{ display:block!important; }
   /* Touch targets (44px min per Apple HIG) */
-  .sbtn{ min-height:44px; min-width:44px; font-size:11px; padding:8px 12px; }
+  .sbtn{ min-height:34px; min-width:34px; font-size:10px; padding:5px 10px; }
   .asToggle{ min-height:40px; font-size:10px; padding:8px 10px; }
   #airportPopup{ min-width:280px; padding:16px 18px; }
   .ob-card{ padding:24px 20px 20px; border-radius:16px; }
@@ -696,8 +696,10 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
     <div class="prow"><span class="k">DEPLOYED</span><span class="v" id="deployTsTop">—</span></div>
     <div class="prow"><span class="k">AIRSPACE</span><span class="v" id="dataAirspaceAge">—</span></div>
     <div class="prow"><span class="k">AIRPORTS</span><span class="v" id="dataAirportsAge">—</span></div>
-    <button class="sbtn" style="width:100%;margin-top:6px;" onclick="refreshAllData()" id="dataRefreshBtn">⟳ REFRESH DATA</button>
-    <button class="sbtn" style="width:100%;margin-top:4px;background:rgba(255,60,60,0.25);border-color:rgba(255,60,60,0.5);" onclick="clearAllData()" id="dataClearBtn">✕ CLEAR DATA</button>
+    <div class="sbrow" style="margin-top:6px;">
+      <button class="sbtn" onclick="refreshAllData()" id="dataRefreshBtn">⟳ REFRESH</button>
+      <button class="sbtn" onclick="clearAllData()" id="dataClearBtn">✕ CLEAR</button>
+    </div>
   </div>
 
   <div class="sps">
@@ -749,7 +751,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
       <button class="sbtn" onclick="setHomeAirport()" title="Set as home">⌂ SET</button>
     </div>
     <div style="display:flex;gap:4px;margin-bottom:6px;">
-      <button class="sbtn" id="homeApBtn" onclick="goToInputAirport(localStorage.getItem('homeAirport')||'KPAO')" style="flex:1;font-size:9px;">⌂ HOME: <span id="homeApLbl">KPAO</span></button>
+      <button class="sbtn" id="homeApBtn" onclick="goToInputAirport(localStorage.getItem('homeAirport')||'KPAO')">⌂ HOME: <span id="homeApLbl">KPAO</span></button>
     </div>
     <div class="sph">Nearby Airports</div>
     <div id="nearbyAirports"></div>
@@ -839,7 +841,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
 
   <!-- Help / Tutorial -->
   <div style="padding:10px 0 4px;border-top:1px solid var(--bdr);margin-top:8px;">
-    <button class="sbtn" style="width:100%;padding:8px;font-size:10px;letter-spacing:.08em;" onclick="closeSettings();showOnboarding();">HELP / TUTORIAL</button>
+    <button class="sbtn" style="width:100%;" onclick="closeSettings();showOnboarding();">HELP / TUTORIAL</button>
   </div>
 </div>
 
