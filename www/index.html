@@ -5537,58 +5537,70 @@ function drawAirspaceAhead(){
   let cursorY = TOP + 6 + insideH;
   const spd = simMode ? simSpeedKt : ac.speedKt;
 
-  // Helper: draw one rich centered airspace info box
+  // Helper: draw one airspace alert info box
+  // Layout: Line 1 = CLASS + FREQ  |  Line 2 = distance + live countdown
   function drawInfoBox(as, nm, isVertOnly, vDistIn, dirIn){
-    const cls      = as.c==='DEFAULT' ? 'Special Use' : 'Class '+as.c;
+    const clsShort = as.c==='DEFAULT' ? 'SUA' : as.c;
     const freq     = getFreqForAirspace(as);
     const col      = asCol(as.c);
     const floorStr = as.b===0 ? 'SFC' : as.b.toLocaleString();
     const ceilStr  = as.t>=18000 ? 'FL180' : as.t.toLocaleString();
 
+    // Recompute nm live each frame for smooth countdown
+    let liveNm = nm;
+    if(!isVertOnly && as.p) liveNm = distToPolyNm(as);
+
     // Determine alert level
-    let vDist = 0, label = '';
+    let vDist = 0;
     if(isVertOnly){
       vDist = vDistIn;
-      const vertDir = dirIn === 'ABOVE' ? 'Above' : 'Below';
-      label = cls+' '+vertDir+' ('+vDist.toLocaleString()+' ft)';
     } else {
       const vDistToFloor = Math.abs(aft - as.b);
       const vDistToCeil  = Math.abs(aft - as.t);
       vDist = Math.min(vDistToFloor, vDistToCeil);
-      let ete = '';
-      if(spd > 5){
-        const secToEntry = (nm / spd) * 3600;
-        if(secToEntry < 60) ete = ' (' + Math.round(secToEntry) + 's)';
-        else { const m = Math.floor(secToEntry/60); const s = Math.round(secToEntry%60); ete = ' (' + m + ':' + String(s).padStart(2,'0') + ')'; }
-      }
-      label = cls + ' in ' + nm.toFixed(1) + 'nm' + ete;
     }
 
-    // Skip if beyond yellow alert range — no white alerts displayed
-    const secToEntry = (!isVertOnly && spd > 5) ? (nm / spd) * 3600 : Infinity;
-    if(!isVertOnly && nm > warnYelNm && secToEntry > warnYelSec) return;
+    // Compute live ETE
+    const secToEntry = (!isVertOnly && spd > 5) ? (liveNm / spd) * 3600 : Infinity;
+
+    // Skip if beyond yellow alert range
+    if(!isVertOnly && liveNm > warnYelNm && secToEntry > warnYelSec) return;
 
     const isRed = (isVertOnly && vDist <= warnVertFt)
-      || (!isVertOnly && (nm <= warnRedNm || secToEntry <= warnRedSec));
+      || (!isVertOnly && (liveNm <= warnRedNm || secToEntry <= warnRedSec));
     const isYellow = !isRed && ((isVertOnly && vDist <= warnYelVertFt)
-      || (!isVertOnly && (nm <= warnYelNm || secToEntry <= warnYelSec)));
-    // No white alerts — skip if neither red nor yellow
+      || (!isVertOnly && (liveNm <= warnYelNm || secToEntry <= warnYelSec)));
     if(!isRed && !isYellow) return;
     const alertCol = isRed ? C.RED : C.YEL;
 
-    // Build lines for the box
-    const freqStr = freq || '—';
-    const altStr = '(' + floorStr + ' - ' + ceilStr + ')';
-    const line2 = freqStr + '  ' + altStr;
-    const lines = [];
-    lines.push({text: label, bold: true, col: alertCol});
-    lines.push({text: line2, bold: false, col: alertCol});
+    // Build ETE string (updates every frame)
+    let eteStr = '';
+    if(!isVertOnly && spd > 5){
+      if(secToEntry < 60) eteStr = Math.round(secToEntry) + 's';
+      else { const m = Math.floor(secToEntry/60); const s = Math.round(secToEntry%60); eteStr = m + ':' + String(s).padStart(2,'0'); }
+    }
 
-    // Draw box (reduced 25%)
-    const lineH = 19;
+    // Line 1: Airspace type + frequency (most important)
+    const freqStr = freq || '';
+    let line1 = isVertOnly
+      ? (dirIn==='ABOVE'?'▲':'▼') + ' Class ' + clsShort + (freqStr ? '  ' + freqStr : '') + '  ' + vDist.toLocaleString() + 'ft ' + dirIn
+      : 'Class ' + clsShort + (freqStr ? '  ' + freqStr : '');
+    // Line 2: Distance + ETE + altitude band
+    const altStr = floorStr + '-' + ceilStr;
+    let line2 = '';
+    if(!isVertOnly){
+      line2 = liveNm.toFixed(1) + 'nm';
+      if(eteStr) line2 += '  ' + eteStr;
+      line2 += '  ' + altStr;
+    } else {
+      line2 = altStr;
+    }
+
+    // Draw box
+    const lineH = 17;
     const boxW = Math.min(300, HW - TAPE_W*2 - 10);
-    const pad = 10;
-    const boxH = lines.length * lineH + pad * 2;
+    const pad = 7;
+    const boxH = 2 * lineH + pad * 2;
     const boxX = HCX - boxW/2;
 
     h.save();
@@ -5614,16 +5626,16 @@ function drawAirspaceAhead(){
     else h.rect(boxX, cursorY, boxW, boxH);
     h.stroke();
 
-    // Draw text lines
+    // Draw text
     h.textAlign = 'center';
     h.textBaseline = 'middle';
-    let y = cursorY + pad + lineH/2;
-    for(const line of lines){
-      h.fillStyle = line.col;
-      h.font = (line.bold ? "bold " : "") + "12px 'Share Tech Mono',monospace"; // reduced 25%
-      h.fillText(line.text, HCX, y);
-      y += lineH;
-    }
+    // Line 1 — bold, class + freq
+    h.fillStyle = alertCol;
+    h.font = "bold 13px 'Share Tech Mono',monospace";
+    h.fillText(line1, HCX, cursorY + pad + lineH/2);
+    // Line 2 — distance + ETE + alt band
+    h.font = "11px 'Share Tech Mono',monospace";
+    h.fillText(line2, HCX, cursorY + pad + lineH + lineH/2);
 
     h.textBaseline = 'alphabetic';
     h.restore();
@@ -5632,28 +5644,23 @@ function drawAirspaceAhead(){
 
   // --- AHEAD alerts ---
   if(results){
-    const hasRed = results.some(r => {
-      const secTo = (spd > 5) ? (r.nm / spd) * 3600 : Infinity;
-      return r.nm <= warnRedNm || secTo <= warnRedSec;
-    });
     for(const r of results){
-      // If airspace is above or below us (not at our altitude), only show
-      // if within intercept alert distance thresholds
+      // Recompute live distance for filtering
+      const liveNm = r.as.p ? distToPolyNm(r.as) : r.nm;
       const isAboveUs = aft < r.as.b;
       const isBelow   = aft > r.as.t;
-      // Show info boxes at white threshold or closer
-      const secTo = (spd > 5) ? (r.nm / spd) * 3600 : Infinity;
-      const fwdShow = r.nm <= warnWhiteNm || secTo <= warnWhiteSec;
+      const secTo = (spd > 5) ? (liveNm / spd) * 3600 : Infinity;
+      const fwdShow = liveNm <= warnWhiteNm || secTo <= warnWhiteSec;
       if(!fwdShow) continue;
 
       if(isAboveUs || isBelow){
         const vDist = isAboveUs ? (r.as.b - aft) : (aft - r.as.t);
-        const interceptRed = vDist <= warnVertFt && (r.nm <= warnRedNm || secTo <= warnRedSec);
-        const interceptYel = vDist <= warnYelVertFt && (r.nm <= warnYelNm || secTo <= warnYelSec);
-        const interceptWhite = vDist <= warnYelVertFt * 2; // show if reasonably close vertically
+        const interceptRed = vDist <= warnVertFt && (liveNm <= warnRedNm || secTo <= warnRedSec);
+        const interceptYel = vDist <= warnYelVertFt && (liveNm <= warnYelNm || secTo <= warnYelSec);
+        const interceptWhite = vDist <= warnYelVertFt * 2;
         if(!interceptRed && !interceptYel && !interceptWhite) continue;
       }
-      drawInfoBox(r.as, r.nm, false);
+      drawInfoBox(r.as, liveNm, false);
     }
   }
 }
