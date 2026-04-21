@@ -1225,7 +1225,7 @@ function rebuildNearbyAS(){
   if(_nearbyASFrame === _frameCount) return;
   _nearbyASFrame = _frameCount;
   _nearbyAS.length = 0;
-  const cosLat = Math.cos(ac.lat*D2R);
+  const cosLat = ac._cosLatR;
   // ~70nm radius in degrees (lat) and per-cosLat (lon)
   const cutoffLatDeg = 70/60;
   const cutoffLonDeg = cutoffLatDeg/Math.max(0.1, cosLat);
@@ -1534,10 +1534,20 @@ const WGS84_A  = 6378137.0;
 const WGS84_F  = 1/298.257223563;
 const WGS84_E2 = 2*WGS84_F - WGS84_F*WGS84_F;
 
+// Scratch vectors — reused every frame to avoid per-frame allocations
+const _scrECEF = new THREE.Vector3();
+const _scrUp   = new THREE.Vector3();
+const _scrEast = new THREE.Vector3();
+const _scrNorth= new THREE.Vector3();
+const _scrHdg  = new THREE.Vector3();
+const _scrSunUp= new THREE.Vector3();
+const _scrSunE = new THREE.Vector3();
+const _scrSunN = new THREE.Vector3();
+
 function latLonAltToECEF(lat,lon,alt){
   const latR=lat*D2R,lonR=lon*D2R;
   const N=WGS84_A/Math.sqrt(1-WGS84_E2*Math.sin(latR)**2);
-  return new THREE.Vector3(
+  return _scrECEF.set(
     (N+alt)*Math.cos(latR)*Math.cos(lonR),
     (N+alt)*Math.cos(latR)*Math.sin(lonR),
     (N*(1-WGS84_E2)+alt)*Math.sin(latR)
@@ -1545,22 +1555,23 @@ function latLonAltToECEF(lat,lon,alt){
 }
 function localUp(lat,lon){
   const latR=lat*D2R,lonR=lon*D2R;
-  return new THREE.Vector3(Math.cos(latR)*Math.cos(lonR),Math.cos(latR)*Math.sin(lonR),Math.sin(latR)).normalize();
+  return _scrUp.set(Math.cos(latR)*Math.cos(lonR),Math.cos(latR)*Math.sin(lonR),Math.sin(latR)).normalize();
 }
-function localEast(lon){const lonR=lon*D2R;return new THREE.Vector3(-Math.sin(lonR),Math.cos(lonR),0).normalize();}
+function localEast(lon){const lonR=lon*D2R;return _scrEast.set(-Math.sin(lonR),Math.cos(lonR),0).normalize();}
 function localNorth(lat,lon){
   const latR=lat*D2R,lonR=lon*D2R;
-  return new THREE.Vector3(-Math.sin(latR)*Math.cos(lonR),-Math.sin(latR)*Math.sin(lonR),Math.cos(latR)).normalize();
+  return _scrNorth.set(-Math.sin(latR)*Math.cos(lonR),-Math.sin(latR)*Math.sin(lonR),Math.cos(latR)).normalize();
 }
 function headingVec(lat,lon,hdgDeg){
   const hdgR=hdgDeg*D2R;
-  return new THREE.Vector3().addScaledVector(localNorth(lat,lon),Math.cos(hdgR)).addScaledVector(localEast(lon),Math.sin(hdgR)).normalize();
+  const n=localNorth(lat,lon).clone(), e=localEast(lon).clone();
+  return _scrHdg.set(0,0,0).addScaledVector(n,Math.cos(hdgR)).addScaledVector(e,Math.sin(hdgR)).normalize();
 }
 
 // Local-to-ECEF matrix — converts flat local coords to WGS84 ECEF
 function buildLocalToECEF(refLat,refLon){
-  const origin=latLonAltToECEF(refLat,refLon,0);
-  const e=localEast(refLon), u=localUp(refLat,refLon), n=localNorth(refLat,refLon);
+  const origin=latLonAltToECEF(refLat,refLon,0).clone();
+  const e=localEast(refLon).clone(), u=localUp(refLat,refLon).clone(), n=localNorth(refLat,refLon).clone();
   const m=new THREE.Matrix4();
   m.makeBasis(e,u,n.clone().negate());
   m.setPosition(origin);
@@ -1725,7 +1736,7 @@ function updateGroundElevation(){
   if(!cesiumViewer || !cesiumViewer.terrainProvider) return;
   if(_gndLastLat !== null){
     const dlat = (ac.lat - _gndLastLat) * 111320;
-    const dlon = (ac.lon - _gndLastLon) * 111320 * Math.cos(ac.lat * D2R);
+    const dlon = (ac.lon - _gndLastLon) * 111320 * ac._cosLatR;
     if(Math.sqrt(dlat*dlat + dlon*dlon) < 200) return;
   }
   _gndLastLat = ac.lat; _gndLastLon = ac.lon;
@@ -1879,6 +1890,9 @@ function buildAirspaceGeometry(){
   precomputeAirspaceBounds();
 }
 
+const _apMarkerColor = Cesium.Color.fromCssColorString('#4ae0ff').withAlpha(0.7);
+const _apMarkerOutline = Cesium.Color.fromCssColorString('#4ae0ff');
+
 function buildAirportMarkers(){
   AIRPORTS.forEach(ap=>{
     const elevM = (ap.elev || 0) * FT_M + 5;
@@ -1886,8 +1900,8 @@ function buildAirportMarkers(){
       position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat, elevM),
       point: {
         pixelSize: 8,
-        color: Cesium.Color.fromCssColorString('#4ae0ff').withAlpha(0.7),
-        outlineColor: Cesium.Color.fromCssColorString('#4ae0ff'),
+        color: _apMarkerColor,
+        outlineColor: _apMarkerOutline,
         outlineWidth: 1,
         heightReference: Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -2025,20 +2039,32 @@ function clearUserLayers(){
 // ═══════════════════════════════════════════════════════════
 // GPS
 // ═══════════════════════════════════════════════════════════
+// Shared GPS teardown — used by toggleGPS and toggleSim
+function teardownGPS(){
+  navigator.geolocation.clearWatch(gpsId); gpsActive=false;
+  if(dataMode==='gps') dataMode='manual';
+  document.getElementById('gpsBtn').classList.remove('gpsOn');
+  const gm=document.getElementById('gpsDotM'); if(gm) gm.style.background='';
+  if(configMode){
+    configMode = false;
+    gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
+    cfgPersist();
+  }
+  const cfb=document.getElementById('configBtn');
+  if(cfb){ cfb.classList.remove('cfgOn'); cfb.style.display='none'; }
+}
+
 function toggleGPS(){
   const btn=document.getElementById('gpsBtn');
   if(!gpsActive){
     if(!navigator.geolocation){toast('GPS unavailable');return;}
-    // Turn SIM off when GPS turns on
     if(simMode) simOff();
     gpsId=navigator.geolocation.watchPosition(p=>{
       if(dataMode==='wifi') return;
       ac.lat=p.coords.latitude; ac.lon=p.coords.longitude;
-      // Capture RAW GPS samples (untouched by calibration)…
       if(p.coords.altitude!=null) rawGpsAltM    = p.coords.altitude;
       if(p.coords.speed!=null)    rawGpsSpeedKt = p.coords.speed*1.944;
       if(p.coords.heading!=null)  rawGpsHdgDeg  = p.coords.heading;
-      // …then publish the calibrated values as ac.* for all downstream calcs.
       applyGpsCalibration();
       dataMode='gps';
       document.getElementById('pSrc').textContent='GPS';
@@ -2048,19 +2074,7 @@ function toggleGPS(){
     const cfb=document.getElementById('configBtn'); if(cfb) cfb.style.display='';
     toast('Acquiring GPS…');
   }else{
-    navigator.geolocation.clearWatch(gpsId); gpsActive=false;
-    if(dataMode==='gps') dataMode='manual';
-    btn.classList.remove('gpsOn');
-    const gm2=document.getElementById('gpsDotM'); if(gm2) gm2.style.background='';
-    // Exit calibration mode (and hide CFG button) whenever GPS goes off
-    if(configMode){
-      configMode = false;
-      gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
-      cfgPersist();
-    }
-    const cfb2=document.getElementById('configBtn');
-    if(cfb2){ cfb2.classList.remove('cfgOn'); cfb2.style.display='none'; }
-    // GPS turned off → fall back to SIM
+    teardownGPS();
     simOn();
     document.getElementById('pSrc').textContent='SIMULATOR';
   }
@@ -2096,19 +2110,7 @@ function toggleSim(){
     toast('SIM OFF — GPS active');
   }else{
     // Turn GPS off when SIM turns on
-    if(gpsActive){
-      navigator.geolocation.clearWatch(gpsId); gpsActive=false;
-      if(dataMode==='gps') dataMode='manual';
-      document.getElementById('gpsBtn').classList.remove('gpsOn');
-      const gm3=document.getElementById('gpsDotM'); if(gm3) gm3.style.background='';
-      if(configMode){
-        configMode = false;
-        gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
-        cfgPersist();
-      }
-      const cfb3=document.getElementById('configBtn');
-      if(cfb3){ cfb3.classList.remove('cfgOn'); cfb3.style.display='none'; }
-    }
+    if(gpsActive) teardownGPS();
     simOn();
     toast('SIM ON — 50 KT · 3,000 FT');
   }
@@ -2167,6 +2169,11 @@ function toggleAirspaceClass(cls, el){
   }
 }
 
+// Consolidated airspace rebuild — geometry + markers + render mode
+function rebuildAirspaceVisuals(){
+  rebuildAirspaceVisuals();
+}
+
 function setAirspaceRender(mode){
   asRenderMode = mode;
   const sb=document.getElementById('solidBtn'); if(sb) sb.classList.toggle('on', mode==='solid');
@@ -2217,7 +2224,7 @@ function updateWarnThresholds(){
 }
 
 // ── Alert diagrams removed — simplified settings panel ──
-function drawAlertDiagram(){}
+// drawAlertDiagram removed (was empty stub)
 
 // (Old diagram functions removed — settings panel simplified)
 
@@ -2243,7 +2250,6 @@ function toggleSettings(){
   document.getElementById('settingsPanel').classList.toggle('open',settingsOpen);
   document.getElementById('settingsBtn').classList.toggle('open',settingsOpen);
   if(settingsOpen){
-    setTimeout(drawAlertDiagram, 50);
     updateDataStatus();
   }
 }
@@ -2324,7 +2330,9 @@ function updateDataStatus(){
 }
 // Update the top-bar timestamp chip once on load (TZ updates when ac.lon changes notably)
 setTimeout(updateDataStatus, 100);
-setInterval(updateDataStatus, 60000);
+// Single 30s interval handles both the always-run (every 60s) and settings-open (every 30s) updates
+let _dataStatusTick = 0;
+setInterval(()=>{ _dataStatusTick++; if(settingsOpen || _dataStatusTick % 2 === 0) updateDataStatus(); }, 30000);
 
 // ═══════════════════════════════════════════════════════════
 // CONFIG (CALIBRATION) MODE — offsets for AIRSPEED / HEADING / ALTITUDE.
@@ -2378,8 +2386,7 @@ async function refreshAllData(){
     updateDataStatus();
   }
 }
-// Keep the age labels updating while the panel is open
-setInterval(()=>{ if(settingsOpen) updateDataStatus(); }, 30000);
+// (interval merged into single 30s timer above)
 function closeSettings(){
   settingsOpen=false;
   document.getElementById('settingsPanel').classList.remove('open');
@@ -2867,7 +2874,7 @@ function flightUpdate(dt){
     const H       = ac.hdg * D2R;
     const distDeg = distM / 111320;
     ac.lat += Math.cos(H) * distDeg;
-    ac.lon += Math.sin(H) * distDeg / Math.cos(ac.lat * D2R);
+    ac.lon += Math.sin(H) * distDeg / ac._cosLatR;
     // Apply simVSfpm to altitude (fpm -> ft/sec * dt)
     if(Math.abs(simVSfpm) > 1){
       simAltFt = Math.max(0, simAltFt + (simVSfpm / 60) * dt);
@@ -2955,11 +2962,10 @@ function updateCamera(){
   asCamera.projectionMatrixInverse.copy(asCamera.projectionMatrix).invert();
 
   // Keep sun high relative to camera for consistent airspace lighting
-  const up = localUp(ac.lat, ac.lon);
-  const sunUp = up.clone().multiplyScalar(50000);
-  const sunE  = localEast(ac.lon).multiplyScalar(20000);
-  const sunN  = localNorth(ac.lat, ac.lon).multiplyScalar(10000);
-  asSun.position.copy(asCamera.position).add(sunUp).add(sunE).add(sunN);
+  _scrSunUp.copy(localUp(ac.lat, ac.lon)).multiplyScalar(50000);
+  _scrSunE.copy(localEast(ac.lon)).multiplyScalar(20000);
+  _scrSunN.copy(localNorth(ac.lat, ac.lon)).multiplyScalar(10000);
+  asSun.position.copy(asCamera.position).add(_scrSunUp).add(_scrSunE).add(_scrSunN);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3252,7 +3258,7 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
 
 // ── Distance from aircraft to nearest polygon edge (nm) ──
 function distToPolyNm(as){
-  const cosLat = Math.cos(ac.lat * D2R);
+  const cosLat = ac._cosLatR;
   const np = as.p.length;
   let best = Infinity;
   for(let vi = 0; vi < np; vi++){
@@ -3383,7 +3389,7 @@ function drawSpdTape(){
 
   // Flash box border if over speed limit
   const overLimit = spdLimit > 0 && kt > spdLimit;
-  const flashOn = overLimit && (Date.now() % 500 < 250);
+  const flashOn = overLimit && (_frameNow % 500 < 250);
 
   h.fillStyle=C.BOX;
   h.strokeStyle = overLimit ? (flashOn ? '#ff3333' : C.BOXBDR) : C.BOXBDR;
@@ -3452,11 +3458,11 @@ function drawAltTape(){
   // Chevrons point toward the nearest way to clear the airspace.
   // Cached — rebuilds when position changes.
   const altBands = [];
-  const now = Date.now();
+  const now = _frameNow;
 
   if(!drawAltTape._cache) drawAltTape._cache = {hits:[], lastLat:0, lastLon:0, lastT:0};
   const _altC = drawAltTape._cache;
-  const _altNow = Date.now();
+  const _altNow = _frameNow;
   const _altPosDelta = Math.abs(ac.lat - _altC.lastLat) + Math.abs(ac.lon - _altC.lastLon);
   const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002;
   if(_altStale){
@@ -3649,9 +3655,9 @@ function drawAltTape(){
 
     // Scan airspaces ahead at current heading
     const _fwdHdgR = (ac.hdg + lookOffset) * D2R;
-    const _fwdCosLat = Math.cos(ac.lat * D2R);
+    const _fwdCosLat = ac._cosLatR;
     const _fwdSpd = Math.max(1, simMode ? simSpeedKt : ac.speedKt);
-    const _fwdNow = Date.now();
+    const _fwdNow = _frameNow;
 
     // Throttle: reuse cached results if position hasn't changed much
     if(!drawAltTape._fwdCache) drawAltTape._fwdCache = {lat:0,lon:0,alt:0,hdg:0,t:0,bands:[]};
@@ -3853,9 +3859,9 @@ function drawRangeBar(){
 
   // ── Probe left and right — find closest airspace on each side ──
   const MAX_RANGE_NM = 2.5;
-  const cosLat = Math.cos(ac.lat * D2R);
+  const cosLat = ac._cosLatR;
   const aft = simMode ? simAltFt : ac.altM / FT_M;
-  const nowF = Date.now();
+  const nowF = _frameNow;
   const leftHdgR = (ac.hdg - 90) * D2R;
   const rightHdgR = (ac.hdg + 90) * D2R;
 
@@ -3865,7 +3871,7 @@ function drawRangeBar(){
       const dd=(nm*1852)/111320;
       const pLat=ac.lat+Math.cos(hdgR)*dd;
       const pLon=ac.lon+Math.sin(hdgR)*dd/cosLat;
-      for(const as of AIRSPACE_DATA){
+      for(const as of _nearbyAS){
         if(!asClassVisible[as.c]) continue;
         if(aft < (as.b - clearanceFt) || aft > (as.t + clearanceFt)) continue;
         if(pointInPoly(ac.lat,ac.lon,as.p)) continue;
@@ -3949,6 +3955,12 @@ function drawRangeBar(){
   h.restore();
 }
 
+// ── Reusable buffers for compass/BEV bearing scans (avoid per-frame allocation) ──
+const _hdgOwner = new Array(360);
+const _hdgTier  = new Uint8Array(360);
+const _bevOwner = new Array(360);
+const _bevTier  = new Uint8Array(360);
+
 // ── SCROLLING HEADING TAPE with airspace bars ──
 function drawHdgTape(){
   const hdgTapeH = BOTTOM_TAPE_H;
@@ -3984,8 +3996,8 @@ function drawHdgTape(){
   // ── Collect all compass bars, then draw sorted: white→yellow→red (red on top) ──
   const barH = th - 2;
   const barY = ty + 1;
-  const cosLat = Math.cos(ac.lat * D2R);
-  const nowT = Date.now();
+  const cosLat = ac._cosLatR;
+  const nowT = _frameNow;
   const hdgBars = []; // {x, w, col, isRed, isYellow, pri}
 
   // --- Compass: 3-tier priority system ---
@@ -3996,7 +4008,7 @@ function drawHdgTape(){
   const _hdgSpd = simMode ? simSpeedKt : ac.speedKt;
   if(!drawHdgTape._cache) drawHdgTape._cache = {airspaces:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
   const _cc = drawHdgTape._cache;
-  const _cNow = Date.now();
+  const _cNow = _frameNow;
   const _posDelta = Math.abs(ac.lat - _cc.lastLat) + Math.abs(ac.lon - _cc.lastLon);
   const _altDelta = Math.abs(aft - _cc.lastAft);
   const _spdDelta = Math.abs(_hdgSpd - _cc.lastSpd);
@@ -4103,8 +4115,8 @@ function drawHdgTape(){
     // Pass 1 (solid): actual same-altitude airspace bearing → tier 1
     // Pass 2 (hatched): any buffer (horiz buffer of same-alt OR buffer-altitude bearing) → tier 2
     // Solid always overrides hatched at any degree.
-    const owner = new Array(360);
-    const tier = new Uint8Array(360);
+    const owner = _hdgOwner; owner.fill(null);
+    const tier = _hdgTier; tier.fill(0);
 
     // PASS 1: Actual same-altitude airspaces (solid) — highest priority
     for(let b=0;b<360;b++){
@@ -4173,7 +4185,7 @@ function drawHdgTape(){
 
   // Alert tiering & drawing
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
-  const nowF = Date.now();
+  const nowF = _frameNow;
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
   const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
   const hdgSolid = [];
@@ -4362,7 +4374,7 @@ function drawAirports(){
   // skip any airport outside a 1.0° lat window (60nm) — avoids per-airport
   // haversine + Three.js project() + localToWorld() calls for 95% of the list.
   const _apCutLat = 60/60; // 1° lat ≈ 60nm
-  const _cosAcLat = Math.cos(ac.lat*D2R);
+  const _cosAcLat = ac._cosLatR;
   const _apCutLon = 60/(60*Math.max(0.1,_cosAcLat));
   AIRPORTS.forEach(ap=>{
     if(/\d/.test(ap.id)) return;
@@ -4418,7 +4430,7 @@ function drawAirports(){
 
 // ── AIRPORT INFO PANEL (drawn last, above all alerts) ──
 function drawAirportInfoPanel(){
-  const nowMs = Date.now();
+  const nowMs = _frameNow;
   const candidates = window._apCandidates || [];
   if(_tappedAp && (nowMs - _tappedApAt) < _AP_INFO_MS){
     let target = null;
@@ -4541,7 +4553,7 @@ let _cachedAutoAltRange = {yMin:0, yMax:10000};
 function calcAutoAltRange(aft){
   if(!shouldUpdate('autoAlt', 500)) return _cachedAutoAltRange;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = Math.cos(ac.lat * D2R);
+  const cosLat = ac._cosLatR;
   let highest = aft + 1000;
   let lowestFloor = Infinity;
 
@@ -4577,7 +4589,7 @@ let _cachedAutoProfRange = 25;
 function calcAutoProfileRange(){
   if(!shouldUpdate('autoProf', 500)) return _cachedAutoProfRange;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = Math.cos(ac.lat * D2R);
+  const cosLat = ac._cosLatR;
   const aft = simMode ? simAltFt : ac.altM / FT_M;
 
   // Find the NEAREST airspace (at current altitude) that the heading line
@@ -4686,6 +4698,9 @@ function toggleAirports(){
   toast(showAirports ? 'Airports ON' : 'Airports OFF', 2000);
 }
 
+// ── Shared VS formatter (hoisted to avoid per-frame closure re-creation) ──
+function fmtVS(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
+
 // ── CROSS-SECTION PROFILE VIEW (rebuilt from scratch) ────
 function drawProfile(){
   if(!profileOn || !profCtx) return;
@@ -4708,7 +4723,7 @@ function drawProfile(){
   // ── State ──
   const aft  = simMode ? simAltFt : ac.altM / FT_M;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = Math.cos(ac.lat * D2R);
+  const cosLat = ac._cosLatR;
 
   // ── X axis ──
   if(profileAutoRange) profileRangeNm = calcAutoProfileRange();
@@ -4759,7 +4774,7 @@ function drawProfile(){
   }
 
   // ── Airspace blocks ──
-  const now=Date.now();
+  const now=_frameNow;
   // PERF: iterate _nearbyAS (bbox-filtered per frame) instead of ALL airspace.
   // For each one, also skip if the probe segment (±profileRange along heading)
   // can't possibly hit its bbox. Cuts airspace scan work by ~90%.
@@ -4974,14 +4989,14 @@ function drawProfile(){
 
   // ── Airspace VS danger-zone bars (VS range that enters airspace) ──
   const _spdKtVS=Math.max(1, simMode?simSpeedKt:ac.speedKt);
-  const _nowTP=Date.now();
+  const _nowTP=_frameNow;
   // Find the single nearest airspace along heading (occlusion — only show what you're heading into)
   // PERF: pre-filter airspaces to those whose bbox the heading probe might hit,
   // and cache the "aircraft-inside" check via pointInPolyAC so it isn't redone
   // 100+ times inside the probe loop.
   let nearestASP=null, nearestNmP=Infinity;
   const _hdgR_vs = ac.hdg*D2R;
-  const _cosLat_vs = Math.cos(ac.lat*D2R);
+  const _cosLat_vs = ac._cosLatR;
   const _vsCandidates = [];
   for(let _vci=0;_vci<_nearbyAS.length;_vci++){
     const as=_nearbyAS[_vci];
@@ -5012,7 +5027,7 @@ function drawProfile(){
     const minToAsP=secToAsP/60;
     const vsToFloorP=(as.b-aft)/minToAsP;
     const vsToCeilP=(as.t-aft)/minToAsP;
-    function fmtVSp(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
+    // fmtVSp removed — using hoisted fmtVS
     // Airspace-bar alert: thresholds apply to |required VS value| on the airspace bar.
     // Aircraft VS does NOT trigger alerts — only the airspace bar does.
     function vsAlertP(edgeVal){
@@ -5040,7 +5055,7 @@ function drawProfile(){
         const a = vsAlertP(ceilValP);
         addFlashOverlay(y1c, fillHc, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y1c)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
-        bkL+='<div style="position:absolute;left:2px;top:'+(y1c-12)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(ceilValP)+'</div>';
+        bkL+='<div style="position:absolute;left:2px;top:'+(y1c-12)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVS(ceilValP)+'</div>';
       }
     }
     // --- BOTTOM HALF: floor zone (negative VS / descending) ---
@@ -5049,7 +5064,7 @@ function drawProfile(){
       const sfcYP = vsToY(0) + 4;
       bkL+='<div style="position:absolute;left:2px;top:'+sfcYP+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">SFC</div>';
       // Solid red flashing fill to indicate no escape down
-      const _sfcFlashP = Math.floor(Date.now()/250) % 2 === 0;
+      const _sfcFlashP = Math.floor(_frameNow/250) % 2 === 0;
       if(_sfcFlashP){
         bkL+='<div style="position:absolute;left:0;right:0;top:'+sfcYP+'px;height:'+(bHL-sfcYP)+'px;background:#ff3333;opacity:0.65;pointer-events:none"></div>';
       }
@@ -5065,7 +5080,7 @@ function drawProfile(){
         const a = vsAlertP(floorValP);
         addFlashOverlay(y1f, fillHf, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y2f)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
-        bkL+='<div style="position:absolute;left:2px;top:'+(y2f+2)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(floorValP)+'</div>';
+        bkL+='<div style="position:absolute;left:2px;top:'+(y2f+2)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVS(floorValP)+'</div>';
       }
     }
     } // end non-surface floor
@@ -5300,6 +5315,10 @@ function getFAASpeedLimit(altFt, lat, lon){
 // Airspace class priority: B > C > D > RESTRICTED (lower = higher priority)
 const CLASS_PRIORITY = {B:0, C:1, D:2, RESTRICTED:3, PROHIBITED:3};
 
+// Reusable sets for getAirspaceAhead (avoid per-call allocation)
+const _gaFoundKeys = new Set();
+const _gaFoundClasses = new Set();
+
 function getAirspaceAhead(maxResults){
   // Throttle to every 2s — reuse cached result otherwise
   if(!shouldUpdate('asAhead', 2000)) return _cachedAirspaceAhead;
@@ -5308,12 +5327,12 @@ function getAirspaceAhead(maxResults){
   const D2R  = Math.PI/180;
   const lookHdg = ac.hdg + lookOffset;
   const hdgR = lookHdg * D2R;
-  const cosLat = Math.cos(ac.lat*D2R);
+  const cosLat = ac._cosLatR;
   const pitchTan = Math.tan(lookPitchOffset * D2R);
 
   const found = []; // {as, nm}
-  const foundKeys = new Set();
-  const foundClasses = new Set(); // skip same class behind first hit
+  const foundKeys = _gaFoundKeys; foundKeys.clear();
+  const foundClasses = _gaFoundClasses; foundClasses.clear();
 
   // PERF: iterate only nearby airspaces that the look-direction probe
   // segment could possibly intersect. Huge reduction on full-scan work.
@@ -5624,8 +5643,8 @@ function drawBirdsEye(){
   // (The map-pan handler mutates ac.hdg directly; the 3D-HUD pan mutates lookOffset.
   //  Using the sum keeps the rose, the heading tape, and the 3D camera all in lockstep.)
   const hdg = normHdg(ac.hdg + lookOffset);
-  const cosLat = Math.cos(ac.lat * D2R);
-  const nowT = Date.now();
+  const cosLat = ac._cosLatR;
+  const nowT = _frameNow;
 
   // Compass rose geometry
   const mapOnly = bevOn && !profileOn;
@@ -5639,7 +5658,7 @@ function drawBirdsEye(){
   {
     const headRoom = 42; // room for heading box (22px) + triangle (9px) + gap above rose
     const labelMargin = 14; // labels drawn at roseR + 14 from center
-    const ribW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--ribW')) || 80;
+    const ribW = window._cachedRibW||(window._cachedRibW=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--ribW'))||80);
     // Desktop both: use bevDiv width (W); otherwise use main 3D div width minus side tapes
     const availW = (isDesktopBev && bothMode) ? W : ((HW || W) - 2 * ribW);
     roseR = (availW / 2 - labelMargin) * 0.90; // 10% shrink
@@ -5872,7 +5891,7 @@ function drawBirdsEye(){
   // Occlusion pass — nearest-first 1° scan, merge contiguous same-owner sweeps.
   roseCand.sort((a,b)=>a.nearestNm - b.nearestNm);
   {
-    const owner = new Array(360);
+    const owner = _bevOwner; owner.fill(null);
     for(let b=0;b<360;b++){
       for(const c of roseCand){
         let hit = false;
@@ -6180,14 +6199,13 @@ function drawHudVSbar(){
   // ── Airspace VS danger-zone bars — multiple airspaces ──
   // Show bars for: (1) nearest airspace ahead on heading, AND (2) any airspace
   // whose altitude buffer zone we're currently within, even if not ahead.
-  const cosLat3=Math.cos(ac.lat*D2R);
+  const cosLat3=ac._cosLatR;
   const aft=simMode?simAltFt:ac.altM/FT_M;
   const spd=simMode?simSpeedKt:ac.speedKt;
   const fwdHdgR3=ac.hdg*D2R;
-  const nowT3=Date.now();
+  const nowT3=_frameNow;
 
-  // Helper functions (defined once, used for each airspace)
-  function fmtVS(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
+  // fmtVS removed — using hoisted module-level version
   function vsAlert(edgeVal){
     const a = Math.abs(edgeVal);
     const red = a > warnRedVsFpm;
@@ -6230,7 +6248,7 @@ function drawHudVSbar(){
     const dd=(nm*1852)/111320;
     const pLat=ac.lat+Math.cos(fwdHdgR3)*dd;
     const pLon=ac.lon+Math.sin(fwdHdgR3)*dd/cosLat3;
-    for(const as of AIRSPACE_DATA){
+    for(const as of _nearbyAS){
       if(!asClassVisible[as.c]) continue;
       if(as.c==='E') continue;
       if(_vsMaxFwd(as) < 0) continue; // entirely behind aircraft
@@ -6308,7 +6326,7 @@ function drawHudVSbar(){
       h.fillStyle=col;h.font="bold 10px 'Share Tech Mono',monospace";h.textAlign='left';
       h.fillText('SFC',x+2,sfcY+10);
       // Solid red flashing fill to indicate no escape down
-      const _sfcFlash = Math.floor(Date.now()/250) % 2 === 0;
+      const _sfcFlash = Math.floor(_frameNow/250) % 2 === 0;
       if(_sfcFlash){
         h.fillStyle=C.RED;h.globalAlpha=0.65;
         h.fillRect(x,sfcY,barW,botY-sfcY);
@@ -6498,15 +6516,19 @@ function updateUI(){
   const altS=aft.toLocaleString()+' FT';
   const hdgS=String(Math.round(ac.hdg)).padStart(3,'0')+'°';
   const spdS=(simMode?Math.round(simSpeedKt):dataMode==='manual'?'---':Math.round(ac.speedKt))+' KT';
-  document.getElementById('pLat').textContent=latS;
-  document.getElementById('pLon').textContent=lonS;
-  document.getElementById('pAlt').textContent=altS;
-  document.getElementById('pHdg').textContent=hdgS;
-  document.getElementById('pSpd').textContent=spdS;
+  if(!updateUI._els) updateUI._els={
+    pLat:document.getElementById('pLat'),pLon:document.getElementById('pLon'),
+    pAlt:document.getElementById('pAlt'),pHdg:document.getElementById('pHdg'),
+    pSpd:document.getElementById('pSpd')
+  };
+  const _u=updateUI._els;
+  _u.pLat.textContent=latS; _u.pLon.textContent=lonS;
+  _u.pAlt.textContent=altS; _u.pHdg.textContent=hdgS;
+  _u.pSpd.textContent=spdS;
 
   // Update nearby airports list (throttled to every 2s)
-  if(!updateUI._apTmr || Date.now()-updateUI._apTmr > 2000){
-    updateUI._apTmr = Date.now();
+  if(!updateUI._apTmr || _frameNow-updateUI._apTmr > 2000){
+    updateUI._apTmr = _frameNow;
     const apEl = document.getElementById('nearbyAirports');
     if(apEl){
       const nearby = AIRPORTS.map(ap => {
@@ -6631,19 +6653,6 @@ function loop(){
   // every hot scan loop (drawProfile, drawBirdsEye, getAirspaceAhead,
   // calcAutoProfileRange, getFAASpeedLimit, etc).
   rebuildNearbyAS();
-
-  // ── Cached filtered airspace (visible, non-E) — reused by all tapes ──
-  if(!window._cachedVisibleAS || _frameNow - (window._cachedVisibleASTime||0) > 250){
-    const _aft=simMode?simAltFt:ac.altM/0.3048;
-    window._cachedVisibleAS=[];
-    for(let i=0;i<AIRSPACE_DATA.length;i++){
-      const as=AIRSPACE_DATA[i];
-      if(!asClassVisible[as.c]) continue;
-      if(as.c==='E') continue;
-      window._cachedVisibleAS.push(as);
-    }
-    window._cachedVisibleASTime=_frameNow;
-  }
 
   // Compute smoothed vertical speed (fpm)
   const _vsNow=performance.now()/1000;
@@ -6831,9 +6840,7 @@ async function init(){
   initHomeAirport();
 
   // Launch the app with embedded KMZ airspace data
-  buildAirspaceGeometry();
-  buildAirportMarkers();
-  setAirspaceRender(asRenderMode);
+  rebuildAirspaceVisuals();
   loop();
 
   // Init profile canvas context (profile defaults on)
@@ -6858,7 +6865,7 @@ async function init(){
   }
 }
 
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+// sleep() removed — was never called
 
 // ── WAKE LOCK ─────────────────────────────────────────────
 let wakeLock = null;
@@ -7160,9 +7167,7 @@ async function loadFAAairspace(forceLat, forceLon){
       c.geometry?.dispose(); c.material?.dispose(); kmlGroup.remove(c);
     }
     airportSource.entities.removeAll();
-    buildAirspaceGeometry();
-    buildAirportMarkers();
-    setAirspaceRender(asRenderMode);
+    rebuildAirspaceVisuals();
     toast(`✓ FAA airspace loaded — ${newData.length} sectors`, 3000);
     console.log(`FAA airspace: ${newData.length} sectors loaded`);
     // Cache airspace data to IndexedDB for offline use
@@ -7183,9 +7188,7 @@ async function loadFAAairspace(forceLat, forceLon){
         c.geometry?.dispose(); c.material?.dispose(); kmlGroup.remove(c);
       }
       airportSource.entities.removeAll();
-      buildAirspaceGeometry();
-      buildAirportMarkers();
-      setAirspaceRender(asRenderMode);
+      rebuildAirspaceVisuals();
       toast(`✓ Airspace loaded (offline cache) — ${cached.length} sectors`, 3000);
       console.log(`Offline airspace: ${cached.length} sectors from cache`);
     } else {
