@@ -719,6 +719,14 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
       <div class="asToggle on" id="alertFlashBtn" onclick="toggleAlertFlash()">Flash</div>
       <div class="asToggle" id="voiceBtn" onclick="toggleVoice()">Voice</div>
     </div>
+    <div style="margin-top:4px;">
+      <label style="font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.08em;">SCREEN FLASH</label>
+      <div class="toggleGroup" style="margin-top:3px;">
+        <div class="tgBtn on" id="scrFlashOff" onclick="setScreenFlash('off')">Off</div>
+        <div class="tgBtn" id="scrFlashLo" onclick="setScreenFlash('low')">Low</div>
+        <div class="tgBtn" id="scrFlashHi" onclick="setScreenFlash('high')">High</div>
+      </div>
+    </div>
   </div>
 <div class="sps">
     <div class="sph">Airspaces</div>
@@ -2238,6 +2246,18 @@ function toggleAlertFlash(){
   const af = document.getElementById('alertFlashBtn'); if(af) af.classList.toggle('on', alertFlashOn);
   const afm = document.getElementById('alertFlashBtnM'); if(afm) afm.classList.toggle('on', alertFlashOn);
   toast(alertFlashOn ? 'Flash Alerts ON' : 'Flash Alerts OFF', 2000);
+}
+
+// ── SCREEN FLASH — full-viewport color flash on compass alert ──
+let screenFlashMode = 'off'; // 'off', 'low' (30%), 'high' (60%)
+let _screenFlashCol = null;  // set per frame by heading tape when alert fires
+let _screenFlashActive = false;
+function setScreenFlash(mode){
+  screenFlashMode = mode;
+  document.getElementById('scrFlashOff').classList.toggle('on', mode==='off');
+  document.getElementById('scrFlashLo').classList.toggle('on', mode==='low');
+  document.getElementById('scrFlashHi').classList.toggle('on', mode==='high');
+  toast('Screen Flash: ' + (mode==='off'?'OFF':mode==='low'?'LOW (30%)':'HIGH (60%)'), 2000);
 }
 
 let voiceAlertsOn = false;
@@ -4377,6 +4397,14 @@ function drawHdgTape(){
     }
   }
 
+  // Set screen flash from compass alerts
+  _screenFlashActive = hdgOverlays.length > 0;
+  if(_screenFlashActive){
+    // Use the most severe alert color (red > yellow)
+    const hasRed = hdgOverlays.some(b => b.col === C.RED);
+    _screenFlashCol = hasRed ? C.RED : C.YEL;
+  }
+
   // ── Draw: non-alert bars first, then alert bars + overlays on top ──
   for(const bar of hdgHatch){ if(bar._alert) continue;
     h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
@@ -6507,6 +6535,22 @@ function drawHUD(){
   }
   // White separator lines are now handled by CSS border-top on profileDiv/bevDiv
   drawAirportInfoPanel(); // drawn last so it appears above all alerts/tapes
+
+  // ─�� SCREEN FLASH — full viewport pulse when compass alert is active ──
+  if(screenFlashMode !== 'off' && _screenFlashActive && _screenFlashCol){
+    const flashAlpha = screenFlashMode === 'high' ? 0.60 : 0.30;
+    // Pulse: flash on/off at alert cadence (250ms red, 500ms yellow)
+    const flashRate = _screenFlashCol === C.RED ? 250 : 500;
+    if(Math.floor(Date.now() / flashRate) % 2 === 0){
+      h.save();
+      h.fillStyle = _screenFlashCol;
+      h.globalAlpha = flashAlpha;
+      h.fillRect(0, 0, HW, HH);
+      h.globalAlpha = 1;
+      h.restore();
+    }
+  }
+  _screenFlashActive = false; // reset each frame
 }
 
 // ═══════════════════════════════════════════════════════════
