@@ -5687,12 +5687,11 @@ function drawAirspaceAhead(){
     parts.push(v3);
     // v4 (time) handled separately at 2x
 
-    // Test if 1 line fits: measure all parts + time at 2x
+    // Test if 1 line fits: all parts same size
     const testSz = Math.min(32, Math.max(16, _alertAvail / 14));
     h.font = "bold " + Math.round(testSz) + "px 'Share Tech Mono',monospace";
     const oneLineInfo = parts.join(' · ') + (v4 ? ' · ' : '');
     const infoW1 = h.measureText(oneLineInfo).width;
-    h.font = "bold " + Math.round(testSz*2) + "px 'Share Tech Mono',monospace";
     const timeW1 = v4 ? h.measureText(v4).width : 0;
     const oneLine = (infoW1 + timeW1) <= _alertAvail;
 
@@ -5700,10 +5699,10 @@ function drawAirspaceAhead(){
     const boxX = HCX - boxW/2;
 
     if(oneLine){
-      // ── Single line: all 4 vars, time at 2x ──
+      // ── Single line: all 4 vars, same size ──
       const baseSz = testSz;
-      const timeSz = Math.round(baseSz * 2);
-      const bh = timeSz + 12;
+      const timeSz = Math.round(baseSz);
+      const bh = baseSz + 12;
 
       h.save();
       h.fillStyle = 'rgba(0,0,0,0.85)';
@@ -5749,7 +5748,7 @@ function drawAirspaceAhead(){
       cursorY += bh + 4;
 
     } else {
-      // ── Two lines: line1 = Class · Freq, line2 = Distance · Time(2x) ──
+      // ── Two lines: line1 = Class · Freq, line2 = Distance · Time (same size) ──
       const line1Parts = [v1];
       if(v2) line1Parts.push(v2);
       const line1Str = line1Parts.join(' · ');
@@ -5757,10 +5756,10 @@ function drawAirspaceAhead(){
 
       // Size each line to fit width
       const sz1 = Math.min(32, Math.max(16, _alertAvail / (line1Str.length * 0.6)));
-      const sz2base = Math.min(32, Math.max(16, _alertAvail / ((line2Info.length + (v4 ? v4.length*1.2 : 0)) * 0.6)));
-      const sz2time = Math.round(sz2base * 2);
+      const sz2base = Math.min(32, Math.max(16, _alertAvail / ((line2Info.length + (v4 ? v4.length : 0)) * 0.6)));
+      const sz2time = Math.round(sz2base);
       const lineH1 = sz1 + 8;
-      const lineH2 = sz2time + 8;
+      const lineH2 = sz2base + 8;
       const pad = 6;
       const bh = lineH1 + lineH2 + pad*2;
 
