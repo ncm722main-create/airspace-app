@@ -5579,7 +5579,6 @@ function getCurrentAirspace(){
 function drawCurrentAirspace(offsetY){
   const inside = getCurrentAirspace();
   if(inside.length === 0) return 0;
-  // Deduplicate by class — show highest class
   const classOrder = ['B','C','D','RESTRICTED'];
   inside.sort((a,b) => classOrder.indexOf(a.c) - classOrder.indexOf(b.c));
   const labels = [];
@@ -5594,7 +5593,6 @@ function drawCurrentAirspace(offsetY){
     labels.push({cls, col, floor: as.b, ceil: as.t, freq});
   }
 
-  // Draw transparent screen tint for highest-priority airspace
   h.save();
   const tintCol = labels[0].col;
   h.fillStyle = tintCol;
@@ -5602,26 +5600,30 @@ function drawCurrentAirspace(offsetY){
   h.fillRect(0, 0, HW, HH);
   h.globalAlpha = 1.0;
 
-  h.textAlign = 'center';
-  h.textBaseline = 'middle';
+  // Compute font size to span available width
+  const avail = HW - TAPE_W*2 - 20;
   let y = TOP + 6 + offsetY;
   for(const lb of labels){
     const clsShort = lb.cls.replace('Class ','');
-    const line1 = 'In Class ' + clsShort + (lb.freq ? '  ' + lb.freq : '');
-    const w = Math.min(600, HW - TAPE_W*2 - 10);
-    const bh = 35; // reduced 50%
-    const bx = HCX - w/2;
+    const txt = 'In Class ' + clsShort + (lb.freq ? ' · ' + lb.freq : '');
+    // Size text to fill ~90% of available width
+    const baseSz = Math.min(36, Math.max(18, avail / (txt.length * 0.55)));
+    const bh = baseSz + 16;
+    const boxW = avail + 10;
+    const bx = HCX - boxW/2;
     h.fillStyle = 'rgba(0,0,0,0.7)';
     h.beginPath();
-    if(h.roundRect) h.roundRect(bx, y, w, bh, 6);
-    else h.rect(bx, y, w, bh);
+    if(h.roundRect) h.roundRect(bx, y, boxW, bh, 6);
+    else h.rect(bx, y, boxW, bh);
     h.fill();
     h.strokeStyle = C.WHITE+'88';
     h.lineWidth = 1.5;
     h.stroke();
-    h.font = "bold 17px 'Share Tech Mono',monospace"; // reduced 50%
+    h.textAlign = 'center';
+    h.textBaseline = 'middle';
+    h.font = "bold " + Math.round(baseSz) + "px 'Share Tech Mono',monospace";
     h.fillStyle = C.WHITE;
-    h.fillText(line1, HCX, y + bh/2);
+    h.fillText(txt, HCX, y + bh/2);
     y += bh + 4;
   }
   h.textBaseline = 'alphabetic';
@@ -5637,7 +5639,9 @@ function drawAirspaceAhead(){
   const spd = simMode ? simSpeedKt : ac.speedKt;
 
   // Helper: draw one airspace alert info box
-  // Layout: Line 1 = CLASS + FREQ  |  Line 2 = distance + live countdown
+  // Single line spanning screen: "Class C · HWD Twr 118.0 · 50s"
+  // Time text is 2x size of the rest
+  const _alertAvail = HW - TAPE_W*2 - 20;
   function drawInfoBox(as, nm, isVertOnly, vDistIn, dirIn){
     const clsShort = as.c==='DEFAULT' ? 'SUA' : as.c;
     const freq     = getFreqForAirspace(as);
@@ -5679,66 +5683,83 @@ function drawAirspaceAhead(){
       else { const m = Math.floor(secToEntry/60); const s = Math.round(secToEntry%60); eteStr = m + ':' + String(s).padStart(2,'0'); }
     }
 
-    // Line 1: Airspace type + frequency (most important)
+    // Build info parts: "Class C · HWD Twr 118.0"
     const freqStr = freq || '';
-    let line1 = isVertOnly
-      ? (dirIn==='ABOVE'?'▲':'▼') + ' Class ' + clsShort + (freqStr ? '  ' + freqStr : '') + '  ' + vDist.toLocaleString() + 'ft ' + dirIn
-      : 'Class ' + clsShort + (freqStr ? '  ' + freqStr : '');
-    // Line 2: Distance + ETE + altitude band
-    const altStr = floorStr + '-' + ceilStr;
-    let line2 = '';
-    if(!isVertOnly){
-      line2 = liveNm.toFixed(1) + 'nm';
-      if(eteStr) line2 += '  ' + eteStr;
-      line2 += '  ' + altStr;
+    let infoParts = 'Class ' + clsShort;
+    if(freqStr) infoParts += ' · ' + freqStr;
+    if(isVertOnly){
+      infoParts += ' · ' + vDist.toLocaleString() + 'ft ' + dirIn;
     } else {
-      line2 = altStr;
+      infoParts += ' · ' + liveNm.toFixed(1) + 'nm';
     }
 
-    // Draw box
-    const lineH = 17;
-    const boxW = Math.min(300, HW - TAPE_W*2 - 10);
-    const pad = 7;
-    const boxH = 2 * lineH + pad * 2;
+    // Compute base font size to span ~85% of available width (info part only)
+    // Time will be appended at 2x, so reserve space for it
+    const etePad = eteStr ? eteStr.length * 1.2 : 0; // rough chars at 2x
+    const totalChars = infoParts.length + etePad;
+    const baseSz = Math.min(32, Math.max(16, _alertAvail / (totalChars * 0.55)));
+    const timeSz = Math.round(baseSz * 2);
+    const bh = timeSz + 12;
+    const boxW = _alertAvail + 10;
     const boxX = HCX - boxW/2;
 
     h.save();
+    // Box background
     h.fillStyle = 'rgba(0,0,0,0.85)';
     h.beginPath();
-    if(h.roundRect) h.roundRect(boxX, cursorY, boxW, boxH, 6);
-    else h.rect(boxX, cursorY, boxW, boxH);
+    if(h.roundRect) h.roundRect(boxX, cursorY, boxW, bh, 6);
+    else h.rect(boxX, cursorY, boxW, bh);
     h.fill();
 
-    // Left accent bar with class color
+    // Left accent bar
     h.fillStyle = col;
     h.globalAlpha = 0.8;
     h.beginPath();
-    if(h.roundRect) h.roundRect(boxX, cursorY, 4, boxH, [6,0,0,6]);
-    else h.fillRect(boxX, cursorY, 4, boxH);
+    if(h.roundRect) h.roundRect(boxX, cursorY, 4, bh, [6,0,0,6]);
+    else h.fillRect(boxX, cursorY, 4, bh);
     h.fill();
     h.globalAlpha = 1.0;
 
+    // Border
     h.strokeStyle = alertCol+'cc';
     h.lineWidth = 1.5;
     h.beginPath();
-    if(h.roundRect) h.roundRect(boxX, cursorY, boxW, boxH, 6);
-    else h.rect(boxX, cursorY, boxW, boxH);
+    if(h.roundRect) h.roundRect(boxX, cursorY, boxW, bh, 6);
+    else h.rect(boxX, cursorY, boxW, bh);
     h.stroke();
 
-    // Draw text
-    h.textAlign = 'center';
+    // Draw text — info parts + large time, all on one line centered
     h.textBaseline = 'middle';
-    // Line 1 — bold, class + freq
     h.fillStyle = alertCol;
-    h.font = "bold 13px 'Share Tech Mono',monospace";
-    h.fillText(line1, HCX, cursorY + pad + lineH/2);
-    // Line 2 — distance + ETE + alt band
-    h.font = "11px 'Share Tech Mono',monospace";
-    h.fillText(line2, HCX, cursorY + pad + lineH + lineH/2);
+    const cy = cursorY + bh/2;
+
+    if(eteStr){
+      // Measure widths to center the combined text
+      h.font = "bold " + Math.round(baseSz) + "px 'Share Tech Mono',monospace";
+      const infoW = h.measureText(infoParts + ' · ').width;
+      h.font = "bold " + timeSz + "px 'Share Tech Mono',monospace";
+      const timeW = h.measureText(eteStr).width;
+      const totalW = infoW + timeW;
+      const startX = HCX - totalW/2;
+
+      // Info text (base size)
+      h.font = "bold " + Math.round(baseSz) + "px 'Share Tech Mono',monospace";
+      h.textAlign = 'left';
+      h.fillText(infoParts + ' · ', startX, cy);
+
+      // Time text (2x size)
+      h.font = "bold " + timeSz + "px 'Share Tech Mono',monospace";
+      h.fillText(eteStr, startX + infoW, cy);
+    } else {
+      // No time — just center the info text
+      h.font = "bold " + Math.round(baseSz) + "px 'Share Tech Mono',monospace";
+      h.textAlign = 'center';
+      h.fillText(infoParts, HCX, cy);
+    }
 
     h.textBaseline = 'alphabetic';
     h.restore();
-    cursorY += boxH + 4;
+    cursorY += bh + 4;
   }
 
   // --- AHEAD alerts ---
