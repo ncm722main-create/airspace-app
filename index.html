@@ -1900,31 +1900,35 @@ const _cesiumMatCache = {};
 
 function getCesiumAirspaceMaterial(hexColorStr){
   if(_cesiumMatCache[hexColorStr]) return _cesiumMatCache[hexColorStr];
-  const sz = 128, c = document.createElement('canvas');
+  // Generate a tiling-friendly crosshatch canvas and return as HTMLCanvasElement
+  // (Cesium handles canvas elements better than dataURLs for texture repeat)
+  const sz = 64, c = document.createElement('canvas');
   c.width = sz; c.height = sz;
   const g = c.getContext('2d');
   const hx = hexColorStr.replace('#','');
   const r = parseInt(hx.substring(0,2),16);
   const gr2 = parseInt(hx.substring(2,4),16);
   const bl = parseInt(hx.substring(4,6),16);
-  g.fillStyle = `rgb(${Math.round(r*0.5)},${Math.round(gr2*0.5)},${Math.round(bl*0.5)})`;
+  // Semi-transparent base fill
+  g.fillStyle = `rgba(${Math.round(r*0.5)},${Math.round(gr2*0.5)},${Math.round(bl*0.5)},0.5)`;
   g.fillRect(0,0,sz,sz);
-  g.strokeStyle = `rgb(${Math.min(255,r+120)},${Math.min(255,gr2+120)},${Math.min(255,bl+120)})`;
+  // Grid lines
+  g.strokeStyle = `rgba(${Math.min(255,r+120)},${Math.min(255,gr2+120)},${Math.min(255,bl+120)},0.8)`;
   g.lineWidth = 1.5;
-  const step = 32;
+  const step = 16;
   for(let i=0;i<=sz;i+=step){
     g.beginPath(); g.moveTo(0,i); g.lineTo(sz,i); g.stroke();
     g.beginPath(); g.moveTo(i,0); g.lineTo(i,sz); g.stroke();
   }
-  g.strokeStyle = `rgba(${Math.min(255,r+60)},${Math.min(255,gr2+60)},${Math.min(255,bl+60)},0.5)`;
-  g.lineWidth = 0.5;
+  // Diagonal crosshatch
+  g.strokeStyle = `rgba(${Math.min(255,r+60)},${Math.min(255,gr2+60)},${Math.min(255,bl+60)},0.45)`;
+  g.lineWidth = 0.8;
   for(let i=-sz;i<=sz*2;i+=step){
     g.beginPath(); g.moveTo(i,0); g.lineTo(i+sz,sz); g.stroke();
     g.beginPath(); g.moveTo(i,sz); g.lineTo(i+sz,0); g.stroke();
   }
-  const dataUrl = c.toDataURL();
-  _cesiumMatCache[hexColorStr] = dataUrl;
-  return dataUrl;
+  _cesiumMatCache[hexColorStr] = c; // store canvas element, not dataURL
+  return c;
 }
 
 function buildCesiumAirspaceEntities(){
@@ -1934,87 +1938,20 @@ function buildCesiumAirspaceEntities(){
   }
   _cesiumASEntities.length = 0;
 
-  // Hide Three.js overlay — Cesium entities replace them
-  kmlGroup.children.forEach(ch => { ch.visible = false; });
-
-  let count = 0;
-  AIRSPACE_DATA.forEach((as, idx) => {
-    if(!as.p || as.p.length < 3) return;
-    const cls = as.c;
-    if(!asClassVisible[cls]) return;
-    const colHex = AS_COLOR[cls] || AS_COLOR.DEFAULT;
-    const floorM = as.b * FT_M;
-    const ceilM = as.t * FT_M;
-    const cesColor = Cesium.Color.fromCssColorString(colHex).withAlpha(0.35);
-    const outlineColor = Cesium.Color.fromCssColorString(colHex).withAlpha(0.8);
-
-    // Positions as Cartesian3 array
-    const positions = [];
-    for(let i = 0; i < as.p.length; i++){
-      positions.push(Cesium.Cartesian3.fromDegrees(as.p[i][1], as.p[i][0]));
-    }
-    // Close the loop for wall
-    positions.push(Cesium.Cartesian3.fromDegrees(as.p[0][1], as.p[0][0]));
-    const n = positions.length;
-
-    try {
-      const texImg = getCesiumAirspaceMaterial(colHex);
-      const wallMat = new Cesium.ImageMaterialProperty({
-        image: texImg,
-        repeat: new Cesium.Cartesian2(4, 4),
-        transparent: true,
-      });
-      const capMat = new Cesium.ImageMaterialProperty({
-        image: texImg,
-        repeat: new Cesium.Cartesian2(4, 4),
-        transparent: true,
-      });
-
-      // Wall entity (vertical sides)
-      const wallEntity = airspaceSource.entities.add({
-        wall: {
-          positions: positions,
-          minimumHeights: new Array(n).fill(floorM),
-          maximumHeights: new Array(n).fill(ceilM),
-          material: wallMat,
-          outline: true,
-          outlineColor: outlineColor,
-          outlineWidth: 1,
-        },
-      });
-      _cesiumASEntities.push(wallEntity);
-
-      // Floor polygon
-      const floorPositions = as.p.map(p => Cesium.Cartesian3.fromDegrees(p[1], p[0]));
-      const floorEntity = airspaceSource.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(floorPositions),
-          height: floorM,
-          material: capMat,
-          outline: true,
-          outlineColor: outlineColor,
-          outlineWidth: 1,
-        },
-      });
-      _cesiumASEntities.push(floorEntity);
-
-      // Ceiling polygon
-      const ceilEntity = airspaceSource.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(floorPositions),
-          height: ceilM,
-          material: capMat,
-          outline: true,
-          outlineColor: outlineColor,
-          outlineWidth: 1,
-        },
-      });
-      _cesiumASEntities.push(ceilEntity);
-      count++;
-    } catch(e){
-      console.warn('Cesium airspace entity failed:', idx, e);
+  // Show Three.js overlay (textured crosshatch meshes) — these have proper tiling textures
+  kmlGroup.children.forEach(ch => {
+    if(ch.isMesh && ch.userData.asClass){
+      ch.visible = asClassVisible[ch.userData.asClass] !== false;
+    } else if(ch.isLine){
+      ch.visible = true;
     }
   });
+
+  // Three.js handles textured airspace rendering (crosshatch pattern).
+  // Cesium entities are not used for airspace visuals — their ImageMaterialProperty
+  // doesn't tile textures properly on Wall entities. The Three.js overlay provides
+  // the correct repeating crosshatch texture via CanvasTexture + RepeatWrapping.
+  let count = kmlGroup.children.length;
 
   console.log(`Cesium airspace entities: ${count} sectors created`);
 }
@@ -2315,7 +2252,6 @@ function setAirspaceRender(mode){
   const sm=document.getElementById('solidBtnM'); if(sm) sm.classList.toggle('on', mode==='solid');
   const wm=document.getElementById('wireBtnM'); if(wm) wm.classList.toggle('on', mode==='wire');
   if(typeof kmlGroup === 'undefined') return;
-  if(_cesiumASEntities && _cesiumASEntities.length > 0) return;
   kmlGroup.children.forEach(ch => {
     if(ch.isMesh){
       if(!ch.material.userData._origColor) ch.material.userData._origColor = ch.material.color.getHex();
@@ -6882,12 +6818,9 @@ function loop(){
       }
     }
     const _iSet = loop._insideSet;
-    const _ceLen = _cesiumASEntities.length;
     const children = kmlGroup.children;
     for(let ci = 0; ci < children.length; ci++){
       const ch = children[ci];
-      // Cesium entities handle 3D rendering — keep Three.js hidden
-      if(_ceLen > 0){ ch.visible = false; continue; }
       if(ch.userData.asIndex !== undefined && ch.isMesh){
         if(!asClassVisible[ch.userData.asClass]){ ch.visible = false; continue; }
         ch.visible = !_iSet.has(ch.userData.asIndex);
