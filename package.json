@@ -1,0 +1,20 @@
+{
+  "name": "earth-pilot-svs",
+  "version": "1.0.0",
+  "description": "Earth Pilot SVS — Synthetic Vision flight HUD",
+  "main": "index.js",
+  "scripts": {
+    "build": "cp index.html www/index.html",
+    "sync": "npm run build && npx cap sync android",
+    "open": "npx cap open android",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["aviation", "hud", "flight", "gps"],
+  "author": "Nic",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1"
+  }
+}

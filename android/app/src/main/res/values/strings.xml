@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Earth Pilot SVS</string>
+    <string name="title_activity_main">Earth Pilot SVS</string>
+    <string name="package_name">com.earthpilot.svs</string>
+    <string name="custom_url_scheme">com.earthpilot.svs</string>
+</resources>

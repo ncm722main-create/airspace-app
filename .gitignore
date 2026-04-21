@@ -1,0 +1,5 @@
+node_modules/
+*.zip
+*.tmp.*
+desktop.ini
+zi*

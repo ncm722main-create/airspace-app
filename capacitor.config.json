@@ -1,0 +1,19 @@
+{
+  "appId": "com.earthpilot.svs",
+  "appName": "Earth Pilot SVS",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": ["*.cesium.com", "*.arcgis.com", "*.arcgisonline.com"]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "KeepAwake": {
+      "enabled": true
+    }
+  }
+}

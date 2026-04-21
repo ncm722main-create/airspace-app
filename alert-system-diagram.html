@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earth Pilot SVS — Alert Bar System</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0e14;
+    color: #e0e4ea;
+    font-family: 'Inter', sans-serif;
+    line-height: 1.6;
+    padding: 32px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #4ae0ff, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 40px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    max-width: 1200px;
+  }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .card.compass::before { background: linear-gradient(90deg, #0000FF, #FF00FF, #44AAFF); }
+  .card.altitude::before { background: linear-gradient(90deg, #0000FF, #FF00FF, #44AAFF); }
+  .card.vs::before { background: linear-gradient(90deg, #FF00FF, #44AAFF, #0000FF); }
+  .card.corridor::before { background: linear-gradient(90deg, #44AAFF, #0000FF, #FF00FF); }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-location {
+    font-size: 11px;
+    font-family: 'Share Tech Mono', monospace;
+    color: #6b7280;
+    margin-bottom: 16px;
+  }
+
+  .formula-box {
+    background: #0d1117;
+    border: 1px solid #1f2937;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .formula-box .keyword { color: #ff7b72; }
+  .formula-box .fn { color: #d2a8ff; }
+  .formula-box .val { color: #79c0ff; }
+  .formula-box .op { color: #6b7280; }
+  .formula-box .comment { color: #484f58; font-style: italic; }
+
+  .step { margin-bottom: 12px; }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #1f2937;
+    font-size: 11px;
+    font-weight: 600;
+    color: #9ca3af;
+    margin-right: 8px;
+    flex-shrink: 0;
+  }
+  .step-text {
+    font-size: 13px;
+    color: #d1d5db;
+  }
+
+  /* ── Tape visual ── */
+  .tape-visual {
+    background: #000;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .zone-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    height: 28px;
+  }
+  .zone-bar {
+    height: 100%;
+    border-radius: 3px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .zone-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: #fff;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8);
+  }
+  .zone-desc {
+    font-size: 11px;
+    color: #9ca3af;
+    font-family: 'Share Tech Mono', monospace;
+    white-space: nowrap;
+  }
+
+  /* ── Threshold reference ── */
+  .thresholds {
+    background: #0d1117;
+    border: 1px solid #1f2937;
+    border-radius: 12px;
+    padding: 24px;
+    margin-top: 24px;
+    max-width: 1200px;
+  }
+  .thresholds h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .thresh-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 700px) { .thresh-grid { grid-template-columns: 1fr; } }
+
+  .thresh-col {
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .thresh-col.red { background: rgba(255,51,51,.08); border: 1px solid rgba(255,51,51,.2); }
+  .thresh-col.yel { background: rgba(255,204,0,.06); border: 1px solid rgba(255,204,0,.15); }
+  .thresh-col.wht { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); }
+
+  .thresh-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .thresh-title .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .thresh-title .dot.red { background: #ff3333; }
+  .thresh-title .dot.yel { background: #ffcc00; }
+  .thresh-title .dot.wht { background: #fff; border: 1px solid #555; }
+
+  .thresh-item {
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    color: #9ca3af;
+    margin-bottom: 4px;
+  }
+  .thresh-val {
+    color: #e0e4ea;
+    font-weight: 500;
+  }
+
+  /* ── Airspace class legend ── */
+  .legend {
+    max-width: 1200px;
+    margin-top: 24px;
+    background: #0d1117;
+    border: 1px solid #1f2937;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .legend h2 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+  .legend-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend-swatch {
+    width: 24px; height: 14px;
+    border-radius: 3px;
+    opacity: 0.7;
+    flex-shrink: 0;
+  }
+  .legend-name {
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    color: #d1d5db;
+  }
+
+  /* ── Flow diagram ── */
+  .flow {
+    margin-top: 24px;
+    max-width: 1200px;
+    background: #0d1117;
+    border: 1px solid #1f2937;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .flow h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  .flow-chain {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+  .flow-node {
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    text-align: center;
+    line-height: 1.4;
+  }
+  .flow-node.check { background: #1e293b; border: 1px solid #334155; color: #94a3b8; }
+  .flow-node.action { background: #0f2a1a; border: 1px solid #166534; color: #4ade80; }
+  .flow-node.skip { background: #2a1215; border: 1px solid #7f1d1d; color: #fca5a5; }
+  .flow-arrow {
+    color: #4b5563;
+    font-size: 18px;
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+  .flow-branch {
+    font-size: 10px;
+    color: #6b7280;
+    margin: 0 2px;
+  }
+
+  .flash-demo {
+    display: inline-block;
+    width: 40px;
+    height: 14px;
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+  .flash-demo.red { animation: flashRed 0.5s infinite; }
+  .flash-demo.yel { animation: flashYel 1s infinite; }
+  @keyframes flashRed {
+    0%, 49% { background: #ff3333; opacity: 0.75; }
+    50%, 100% { background: transparent; }
+  }
+  @keyframes flashYel {
+    0%, 49% { background: #ffcc00; opacity: 0.65; }
+    50%, 100% { background: transparent; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Alert Bar System</h1>
+<p class="subtitle">Earth Pilot SVS — How airspace bars appear on each tape</p>
+
+<!-- ── DECISION FLOW ── -->
+<div class="flow">
+  <h2>Decision Flow (every frame, per airspace)</h2>
+  <div class="flow-chain">
+    <div class="flow-node check">Within white<br>threshold?</div>
+    <span class="flow-arrow">→</span>
+    <span class="flow-branch">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node action">Show bar in<br>class color</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node check">Within yellow<br>threshold?</div>
+    <span class="flow-arrow">→</span>
+    <span class="flow-branch">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node action" style="border-color:#854d0e;background:#1a1500">
+      <span class="flash-demo yel"></span><br>Yellow flash
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node check">Within red<br>threshold?</div>
+    <span class="flow-arrow">→</span>
+    <span class="flow-branch">YES</span>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node action" style="border-color:#991b1b;background:#1f0a0a">
+      <span class="flash-demo red"></span><br>Red flash
+    </div>
+  </div>
+  <div style="margin-top:10px">
+    <div class="flow-chain">
+      <div class="flow-node check" style="opacity:.5">Within white<br>threshold?</div>
+      <span class="flow-arrow">→</span>
+      <span class="flow-branch">NO</span>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node skip">Hidden<br>(not shown)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── TAPE CARDS ── -->
+<div class="grid" style="margin-top:24px">
+
+  <!-- COMPASS TAPE -->
+  <div class="card compass">
+    <div class="card-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ae0ff" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36z"/></svg>
+      Compass Tape
+    </div>
+    <div class="card-location">drawHdgTape() — bottom center, ±90° view</div>
+
+    <div class="formula-box">
+      <span class="comment">// Visibility gate</span><br>
+      <span class="keyword">show IF</span> <span class="fn">fwdNm</span> <span class="op">≤</span> <span class="val">warnWhiteNm</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="op">OR</span> <span class="fn">timeToEntry</span> <span class="op">≤</span> <span class="val">warnWhiteSec</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="op">OR</span> <span class="fn">proxNm</span> <span class="op">≤</span> <span class="val">warnWhiteLatNm</span><br><br>
+      <span class="comment">// Then keep only nearest per sector</span><br>
+      <span class="keyword">filter</span> <span class="fn">occlusionTest</span><span class="op">(</span><span class="val">50% overlap</span><span class="op">)</span>
+    </div>
+
+    <div class="step"><span class="step-num">1</span><span class="step-text">Probe ±90° in 4° steps, 0.4 nm increments, up to 15 nm</span></div>
+    <div class="step"><span class="step-num">2</span><span class="step-text">Forward probe along heading: distance + time to entry</span></div>
+    <div class="step"><span class="step-num">3</span><span class="step-text">Proximity: closest edge segment, discarded if flying away >120°</span></div>
+    <div class="step"><span class="step-num">4</span><span class="step-text">Occlusion filter: only nearest airspace per angular sector</span></div>
+
+    <div class="tape-visual">
+      <div style="text-align:center;font:10px 'Share Tech Mono',monospace;color:#6b7280;margin-bottom:8px">← 90° &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; HDG &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 90° →</div>
+      <div class="zone-row">
+        <div class="zone-bar" style="width:60px;background:rgba(0,0,255,.5);margin-left:30px"><span class="zone-label">B</span></div>
+        <span class="zone-desc">Class B at 4.2nm — class color</span>
+      </div>
+      <div class="zone-row">
+        <div class="zone-bar" style="width:45px;background:rgba(255,0,255,.5);margin-left:120px"><span class="zone-label">C</span></div>
+        <span class="zone-desc">Class C at 1.8nm — yellow overlay</span>
+      </div>
+      <div class="zone-row">
+        <div class="zone-bar" style="width:35px;background:rgba(255,51,51,.75);margin-left:80px"><span class="zone-label">D</span></div>
+        <span class="zone-desc">Class D at 0.7nm — red flash</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- GPS ALTITUDE TAPE -->
+  <div class="card altitude">
+    <div class="card-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ae0ff" stroke-width="2"><path d="M12 2v20M2 12h4M18 12h4M7 7l2 2M15 7l-2 2"/></svg>
+      GPS Altitude Tape
+    </div>
+    <div class="card-location">drawAltTape() — right side, ±2000 ft view</div>
+
+    <div class="formula-box">
+      <span class="comment">// Vertical neighbors (laterally inside polygon)</span><br>
+      <span class="keyword">show IF</span> <span class="fn">vertDist</span> <span class="op">≤</span> <span class="val">warnYelVertFt</span><br><br>
+      <span class="comment">// Forward intercept (at current altitude)</span><br>
+      <span class="keyword">show IF</span> <span class="fn">fwdInterceptNm</span> <span class="op">≤</span> <span class="val">warnWhiteNm</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="op">OR</span> <span class="fn">fwdSecToEntry</span> <span class="op">≤</span> <span class="val">warnWhiteSec</span>
+    </div>
+
+    <div class="step"><span class="step-num">1</span><span class="step-text">Find nearest floor ABOVE + nearest ceiling BELOW (laterally inside)</span></div>
+    <div class="step"><span class="step-num">2</span><span class="step-text">Probe forward along heading for first airspace at current altitude</span></div>
+    <div class="step"><span class="step-num">3</span><span class="step-text">Gate: vertical neighbors by warnYelVertFt, forward by white thresholds</span></div>
+
+    <div class="tape-visual">
+      <div style="text-align:center;font:10px 'Share Tech Mono',monospace;color:#6b7280;margin-bottom:8px">↑ higher altitude</div>
+      <div class="zone-row">
+        <div class="zone-bar" style="width:100%;height:22px;background:rgba(255,0,255,.5)"><span class="zone-label">Class C floor — 800 ft above</span></div>
+      </div>
+      <div style="height:30px;display:flex;align-items:center;justify-content:center">
+        <span style="font:bold 12px 'Share Tech Mono',monospace;color:#fff;background:rgba(0,0,0,.9);padding:2px 12px;border:1px solid #fff;border-radius:3px">▸ 2,450 ft</span>
+      </div>
+      <div class="zone-row">
+        <div class="zone-bar" style="width:100%;height:22px;background:rgba(0,0,255,.5)"><span class="zone-label">Class B ceiling — 450 ft below</span></div>
+      </div>
+      <div style="text-align:center;font:10px 'Share Tech Mono',monospace;color:#6b7280;margin-top:8px">↓ lower altitude</div>
+    </div>
+  </div>
+
+  <!-- VERTICAL SPEED TAPE -->
+  <div class="card vs">
+    <div class="card-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ae0ff" stroke-width="2"><path d="M12 2v20M5 15l7 7 7-7"/></svg>
+      Vertical Speed Tape
+    </div>
+    <div class="card-location">drawHudVSbar() / drawProfile() — ±2500 fpm</div>
+
+    <div class="formula-box">
+      <span class="comment">// Visibility gate</span><br>
+      <span class="keyword">show IF</span> <span class="fn">fwdNm</span> <span class="op">≤</span> <span class="val">warnWhiteNm</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="op">AND</span> <span class="fn">timeToEntry</span> <span class="op">≤</span> <span class="val">warnWhiteSec</span><br><br>
+      <span class="comment">// Danger band calculation</span><br>
+      <span class="fn">vsToFloor</span> <span class="op">=</span> <span class="op">(</span><span class="val">as.floor</span> <span class="op">-</span> <span class="val">alt</span><span class="op">)</span> <span class="op">/</span> <span class="fn">minToEntry</span><br>
+      <span class="fn">vsToCeil</span> &nbsp;<span class="op">=</span> <span class="op">(</span><span class="val">as.ceil</span> &nbsp;<span class="op">-</span> <span class="val">alt</span><span class="op">)</span> <span class="op">/</span> <span class="fn">minToEntry</span><br>
+      <span class="keyword">band</span> <span class="op">=</span> <span class="op">[</span><span class="fn">min</span><span class="op">(</span>floor,ceil<span class="op">)</span> … <span class="fn">max</span><span class="op">(</span>floor,ceil<span class="op">)</span><span class="op">]</span>
+    </div>
+
+    <div class="step"><span class="step-num">1</span><span class="step-text">Probe forward along heading for closest airspace entry distance</span></div>
+    <div class="step"><span class="step-num">2</span><span class="step-text">Compute time to entry from speed; skip if outside white thresholds</span></div>
+    <div class="step"><span class="step-num">3</span><span class="step-text">Calculate fpm range that would put aircraft inside airspace</span></div>
+    <div class="step"><span class="step-num">4</span><span class="step-text">Red if current VS is inside band or within 200 fpm; yellow if within 500 fpm</span></div>
+
+    <div class="tape-visual">
+      <div style="display:flex;gap:12px;align-items:stretch;height:120px">
+        <div style="width:40px;background:#111;border-radius:4px;position:relative;overflow:hidden">
+          <div style="position:absolute;left:0;right:0;top:20px;height:35px;background:rgba(255,0,255,.35)"></div>
+          <div style="position:absolute;left:0;right:0;top:20px;border-top:2px dashed #FF00FF"></div>
+          <div style="position:absolute;left:0;right:0;top:55px;border-top:2px dashed #FF00FF"></div>
+          <div style="position:absolute;left:0;right:0;top:60px;height:100%;background:rgba(0,0,0,.5)"></div>
+          <div style="position:absolute;left:0;right:0;top:58px;border-top:1.5px solid rgba(255,255,255,.7)"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:space-between;font:10px 'Share Tech Mono',monospace;color:#9ca3af">
+          <span>+2.5K fpm</span>
+          <span style="color:#FF00FF">← danger band: VS that enters Class C</span>
+          <span>0 fpm ——</span>
+          <span>-2.5K fpm</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CORRIDOR BAR -->
+  <div class="card corridor">
+    <div class="card-title">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ae0ff" stroke-width="2"><path d="M5 12h14M12 5v14"/><circle cx="12" cy="12" r="3"/></svg>
+      Corridor Bar (Lateral)
+    </div>
+    <div class="card-location">drawCorridorBar() — bottom center, left/right proximity</div>
+
+    <div class="formula-box">
+      <span class="comment">// Only nearest airspace per side</span><br>
+      <span class="keyword">show IF</span> <span class="fn">edgeDist</span> <span class="op">≤</span> <span class="val">warnWhiteLatNm</span><br><br>
+      <span class="comment">// Bar width proportional to distance</span><br>
+      <span class="fn">barWidth</span> <span class="op">=</span> <span class="op">(</span><span class="fn">dist</span> <span class="op">/</span> <span class="val">warnWhiteLatNm</span><span class="op">)</span> <span class="op">×</span> <span class="val">halfWidth</span><br>
+      <span class="comment">// Closer = wider fill toward center</span>
+    </div>
+
+    <div class="step"><span class="step-num">1</span><span class="step-text">For each airspace at current altitude, compute closest edge on each side</span></div>
+    <div class="step"><span class="step-num">2</span><span class="step-text">Keep only the single nearest airspace per side (left / right)</span></div>
+    <div class="step"><span class="step-num">3</span><span class="step-text">Bar width scales linearly: closer airspace = wider fill toward center</span></div>
+
+    <div class="tape-visual">
+      <div style="height:28px;background:#111;border-radius:4px;position:relative;overflow:hidden;display:flex;align-items:center">
+        <div style="position:absolute;left:0;width:35%;height:100%;background:rgba(68,170,255,.35)"></div>
+        <div style="position:absolute;right:0;width:15%;height:100%;background:rgba(0,0,255,.35)"></div>
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.7)"></div>
+        <span style="position:absolute;left:10%;font:bold 9px 'Share Tech Mono',monospace;color:#44AAFF">D 0.8nm</span>
+        <span style="position:absolute;right:5%;font:bold 9px 'Share Tech Mono',monospace;color:#0000FF">B 2.4nm</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font:10px 'Share Tech Mono',monospace;color:#6b7280;margin-top:4px">
+        <span>← LEFT</span>
+        <span>CENTER (aircraft)</span>
+        <span>RIGHT →</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── THRESHOLD REFERENCE ── -->
+<div class="thresholds">
+  <h2>Alert Thresholds (configurable in Settings)</h2>
+  <div class="thresh-grid">
+    <div class="thresh-col red">
+      <div class="thresh-title"><span class="dot red"></span> Red Alert — Flashes 4 Hz</div>
+      <div class="thresh-item">Forward: <span class="thresh-val">≤ 1.0 nm</span> or <span class="thresh-val">≤ 30 sec</span></div>
+      <div class="thresh-item">Vertical: <span class="thresh-val">≤ 500 ft</span></div>
+      <div class="thresh-item">Lateral: <span class="thresh-val">≤ 0.5 nm</span></div>
+      <div style="margin-top:8px;font-size:11px;color:#fca5a5">Immediate threat — flashing red overlay on class color</div>
+    </div>
+    <div class="thresh-col yel">
+      <div class="thresh-title"><span class="dot yel"></span> Yellow Alert — Flashes 2 Hz</div>
+      <div class="thresh-item">Forward: <span class="thresh-val">≤ 2.0 nm</span> or <span class="thresh-val">≤ 60 sec</span></div>
+      <div class="thresh-item">Vertical: <span class="thresh-val">≤ 1000 ft</span></div>
+      <div class="thresh-item">Lateral: <span class="thresh-val">≤ 1.0 nm</span></div>
+      <div style="margin-top:8px;font-size:11px;color:#fde68a">Caution — flashing yellow overlay on class color</div>
+    </div>
+    <div class="thresh-col wht">
+      <div class="thresh-title"><span class="dot wht"></span> White (Visibility Gate)</div>
+      <div class="thresh-item">Forward: <span class="thresh-val">≤ 5.0 nm</span> or <span class="thresh-val">≤ 300 sec</span></div>
+      <div class="thresh-item">Lateral: <span class="thresh-val">≤ 3.0 nm</span></div>
+      <div style="margin-top:8px;font-size:11px;color:#d1d5db">Controls bar visibility only — shown in airspace class color, no flash</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── AIRSPACE CLASS LEGEND ── -->
+<div class="legend">
+  <h2>Airspace Class Colors</h2>
+  <div class="legend-row">
+    <div class="legend-item"><div class="legend-swatch" style="background:#0000FF"></div><span class="legend-name">Class B</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#FF00FF"></div><span class="legend-name">Class C</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#44AAFF"></div><span class="legend-name">Class D</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#7755bb"></div><span class="legend-name">Class E</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#FF0000"></div><span class="legend-name">Restricted / Prohibited</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#FF00FF"></div><span class="legend-name">MOA</span></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#FFAA00"></div><span class="legend-name">Warning</span></div>
+  </div>
+</div>
+
+</body>
+</html>
