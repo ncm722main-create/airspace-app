@@ -2172,7 +2172,9 @@ function toggleAirspaceClass(cls, el){
 
 // Consolidated airspace rebuild — geometry + markers + render mode
 function rebuildAirspaceVisuals(){
-  rebuildAirspaceVisuals();
+  buildAirspaceGeometry();
+  buildAirportMarkers();
+  setAirspaceRender(asRenderMode);
 }
 
 function setAirspaceRender(mode){
