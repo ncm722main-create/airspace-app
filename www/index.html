@@ -296,9 +296,8 @@ html,body{
 .prow .k{color:var(--muted);}.prow .v{color:var(--txt);}
 .sbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:4px;
   background:rgba(255,255,255,.04);border:1px solid var(--bdr);color:var(--dim);
-  font-family:var(--mono);font-weight:500;font-size:10px;padding:4px 8px;border-radius:var(--radius-sm);
-  cursor:pointer;transition:all var(--transition-fast);white-space:nowrap;
-  height:auto;box-sizing:border-box;line-height:1.2;}
+  font-family:var(--mono);font-weight:500;font-size:10px;padding:6px 8px;border-radius:var(--radius-sm);
+  cursor:pointer;transition:all var(--transition-fast);white-space:nowrap;}
 .sbtn:hover{background:rgba(255,255,255,.09);border-color:var(--bdrhi);color:var(--txt);}
 .sbtn:active{transform:scale(.97);background:rgba(255,255,255,.12);}
 .sbrow{display:flex;gap:5px;margin-top:5px;}
@@ -1218,16 +1217,16 @@ function segmentMaybeHits(as, acLat, acLon, hdgR, maxNm, cosLat, marginDeg){
 // ── PERF: per-frame "nearby airspace" filter ──
 // Built once per loop() tick, reused by every airspace scan so we iterate
 // 5–10 airspaces instead of 50–200. Cutoff is the max probe distance any
-// subsystem uses (~60nm for profile, 50nm for getAirspaceAhead, bevRangeNm up to 100nm).
+// subsystem uses (~60nm for profile, 50nm for getAirspaceAhead, bevRangeNm).
 let _nearbyAS = [];
 let _nearbyASFrame = -1;
 function rebuildNearbyAS(){
   if(_nearbyASFrame === _frameCount) return;
   _nearbyASFrame = _frameCount;
   _nearbyAS.length = 0;
-  const cosLat = ac._cosLatR;
-  // ~120nm radius in degrees (lat) — covers 100nm BEV + margin
-  const cutoffLatDeg = 120/60;
+  const cosLat = Math.cos(ac.lat*D2R);
+  // ~70nm radius in degrees (lat) and per-cosLat (lon)
+  const cutoffLatDeg = 70/60;
   const cutoffLonDeg = cutoffLatDeg/Math.max(0.1, cosLat);
   for(let i=0;i<AIRSPACE_DATA.length;i++){
     const as = AIRSPACE_DATA[i];
@@ -1282,7 +1281,6 @@ function shouldUpdate(key, intervalMs){
 let _cachedAirspaceAhead = null;
 let _cachedVerticalAirspace = null;
 let _cachedCurrentAirspace = [];
-const _insideSet = new Set(); // reused each frame to avoid GC
 
 // ═══════════════════════════════════════════════════════════
 // CONSTANTS
@@ -1535,20 +1533,10 @@ const WGS84_A  = 6378137.0;
 const WGS84_F  = 1/298.257223563;
 const WGS84_E2 = 2*WGS84_F - WGS84_F*WGS84_F;
 
-// Scratch vectors — reused every frame to avoid per-frame allocations
-const _scrECEF = new THREE.Vector3();
-const _scrUp   = new THREE.Vector3();
-const _scrEast = new THREE.Vector3();
-const _scrNorth= new THREE.Vector3();
-const _scrHdg  = new THREE.Vector3();
-const _scrSunUp= new THREE.Vector3();
-const _scrSunE = new THREE.Vector3();
-const _scrSunN = new THREE.Vector3();
-
 function latLonAltToECEF(lat,lon,alt){
   const latR=lat*D2R,lonR=lon*D2R;
   const N=WGS84_A/Math.sqrt(1-WGS84_E2*Math.sin(latR)**2);
-  return _scrECEF.set(
+  return new THREE.Vector3(
     (N+alt)*Math.cos(latR)*Math.cos(lonR),
     (N+alt)*Math.cos(latR)*Math.sin(lonR),
     (N*(1-WGS84_E2)+alt)*Math.sin(latR)
@@ -1556,23 +1544,22 @@ function latLonAltToECEF(lat,lon,alt){
 }
 function localUp(lat,lon){
   const latR=lat*D2R,lonR=lon*D2R;
-  return _scrUp.set(Math.cos(latR)*Math.cos(lonR),Math.cos(latR)*Math.sin(lonR),Math.sin(latR)).normalize();
+  return new THREE.Vector3(Math.cos(latR)*Math.cos(lonR),Math.cos(latR)*Math.sin(lonR),Math.sin(latR)).normalize();
 }
-function localEast(lon){const lonR=lon*D2R;return _scrEast.set(-Math.sin(lonR),Math.cos(lonR),0).normalize();}
+function localEast(lon){const lonR=lon*D2R;return new THREE.Vector3(-Math.sin(lonR),Math.cos(lonR),0).normalize();}
 function localNorth(lat,lon){
   const latR=lat*D2R,lonR=lon*D2R;
-  return _scrNorth.set(-Math.sin(latR)*Math.cos(lonR),-Math.sin(latR)*Math.sin(lonR),Math.cos(latR)).normalize();
+  return new THREE.Vector3(-Math.sin(latR)*Math.cos(lonR),-Math.sin(latR)*Math.sin(lonR),Math.cos(latR)).normalize();
 }
 function headingVec(lat,lon,hdgDeg){
   const hdgR=hdgDeg*D2R;
-  const n=localNorth(lat,lon).clone(), e=localEast(lon).clone();
-  return _scrHdg.set(0,0,0).addScaledVector(n,Math.cos(hdgR)).addScaledVector(e,Math.sin(hdgR)).normalize();
+  return new THREE.Vector3().addScaledVector(localNorth(lat,lon),Math.cos(hdgR)).addScaledVector(localEast(lon),Math.sin(hdgR)).normalize();
 }
 
 // Local-to-ECEF matrix — converts flat local coords to WGS84 ECEF
 function buildLocalToECEF(refLat,refLon){
-  const origin=latLonAltToECEF(refLat,refLon,0).clone();
-  const e=localEast(refLon).clone(), u=localUp(refLat,refLon).clone(), n=localNorth(refLat,refLon).clone();
+  const origin=latLonAltToECEF(refLat,refLon,0);
+  const e=localEast(refLon), u=localUp(refLat,refLon), n=localNorth(refLat,refLon);
   const m=new THREE.Matrix4();
   m.makeBasis(e,u,n.clone().negate());
   m.setPosition(origin);
@@ -1737,7 +1724,7 @@ function updateGroundElevation(){
   if(!cesiumViewer || !cesiumViewer.terrainProvider) return;
   if(_gndLastLat !== null){
     const dlat = (ac.lat - _gndLastLat) * 111320;
-    const dlon = (ac.lon - _gndLastLon) * 111320 * ac._cosLatR;
+    const dlon = (ac.lon - _gndLastLon) * 111320 * Math.cos(ac.lat * D2R);
     if(Math.sqrt(dlat*dlat + dlon*dlon) < 200) return;
   }
   _gndLastLat = ac.lat; _gndLastLon = ac.lon;
@@ -1891,9 +1878,6 @@ function buildAirspaceGeometry(){
   precomputeAirspaceBounds();
 }
 
-const _apMarkerColor = Cesium.Color.fromCssColorString('#4ae0ff').withAlpha(0.7);
-const _apMarkerOutline = Cesium.Color.fromCssColorString('#4ae0ff');
-
 function buildAirportMarkers(){
   AIRPORTS.forEach(ap=>{
     const elevM = (ap.elev || 0) * FT_M + 5;
@@ -1901,8 +1885,8 @@ function buildAirportMarkers(){
       position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat, elevM),
       point: {
         pixelSize: 8,
-        color: _apMarkerColor,
-        outlineColor: _apMarkerOutline,
+        color: Cesium.Color.fromCssColorString('#4ae0ff').withAlpha(0.7),
+        outlineColor: Cesium.Color.fromCssColorString('#4ae0ff'),
         outlineWidth: 1,
         heightReference: Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -2040,32 +2024,20 @@ function clearUserLayers(){
 // ═══════════════════════════════════════════════════════════
 // GPS
 // ═══════════════════════════════════════════════════════════
-// Shared GPS teardown — used by toggleGPS and toggleSim
-function teardownGPS(){
-  navigator.geolocation.clearWatch(gpsId); gpsActive=false;
-  if(dataMode==='gps') dataMode='manual';
-  document.getElementById('gpsBtn').classList.remove('gpsOn');
-  const gm=document.getElementById('gpsDotM'); if(gm) gm.style.background='';
-  if(configMode){
-    configMode = false;
-    gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
-    cfgPersist();
-  }
-  const cfb=document.getElementById('configBtn');
-  if(cfb){ cfb.classList.remove('cfgOn'); cfb.style.display='none'; }
-}
-
 function toggleGPS(){
   const btn=document.getElementById('gpsBtn');
   if(!gpsActive){
     if(!navigator.geolocation){toast('GPS unavailable');return;}
+    // Turn SIM off when GPS turns on
     if(simMode) simOff();
     gpsId=navigator.geolocation.watchPosition(p=>{
       if(dataMode==='wifi') return;
       ac.lat=p.coords.latitude; ac.lon=p.coords.longitude;
+      // Capture RAW GPS samples (untouched by calibration)…
       if(p.coords.altitude!=null) rawGpsAltM    = p.coords.altitude;
       if(p.coords.speed!=null)    rawGpsSpeedKt = p.coords.speed*1.944;
       if(p.coords.heading!=null)  rawGpsHdgDeg  = p.coords.heading;
+      // …then publish the calibrated values as ac.* for all downstream calcs.
       applyGpsCalibration();
       dataMode='gps';
       document.getElementById('pSrc').textContent='GPS';
@@ -2075,7 +2047,19 @@ function toggleGPS(){
     const cfb=document.getElementById('configBtn'); if(cfb) cfb.style.display='';
     toast('Acquiring GPS…');
   }else{
-    teardownGPS();
+    navigator.geolocation.clearWatch(gpsId); gpsActive=false;
+    if(dataMode==='gps') dataMode='manual';
+    btn.classList.remove('gpsOn');
+    const gm2=document.getElementById('gpsDotM'); if(gm2) gm2.style.background='';
+    // Exit calibration mode (and hide CFG button) whenever GPS goes off
+    if(configMode){
+      configMode = false;
+      gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
+      cfgPersist();
+    }
+    const cfb2=document.getElementById('configBtn');
+    if(cfb2){ cfb2.classList.remove('cfgOn'); cfb2.style.display='none'; }
+    // GPS turned off → fall back to SIM
     simOn();
     document.getElementById('pSrc').textContent='SIMULATOR';
   }
@@ -2111,7 +2095,19 @@ function toggleSim(){
     toast('SIM OFF — GPS active');
   }else{
     // Turn GPS off when SIM turns on
-    if(gpsActive) teardownGPS();
+    if(gpsActive){
+      navigator.geolocation.clearWatch(gpsId); gpsActive=false;
+      if(dataMode==='gps') dataMode='manual';
+      document.getElementById('gpsBtn').classList.remove('gpsOn');
+      const gm3=document.getElementById('gpsDotM'); if(gm3) gm3.style.background='';
+      if(configMode){
+        configMode = false;
+        gpsCalSpd = 0; gpsCalHdg = 0; gpsCalAlt = 0; gpsCalibMode = false;
+        cfgPersist();
+      }
+      const cfb3=document.getElementById('configBtn');
+      if(cfb3){ cfb3.classList.remove('cfgOn'); cfb3.style.display='none'; }
+    }
     simOn();
     toast('SIM ON — 50 KT · 3,000 FT');
   }
@@ -2170,13 +2166,6 @@ function toggleAirspaceClass(cls, el){
   }
 }
 
-// Consolidated airspace rebuild — geometry + markers + render mode
-function rebuildAirspaceVisuals(){
-  buildAirspaceGeometry();
-  buildAirportMarkers();
-  setAirspaceRender(asRenderMode);
-}
-
 function setAirspaceRender(mode){
   asRenderMode = mode;
   const sb=document.getElementById('solidBtn'); if(sb) sb.classList.toggle('on', mode==='solid');
@@ -2227,7 +2216,7 @@ function updateWarnThresholds(){
 }
 
 // ── Alert diagrams removed — simplified settings panel ──
-// drawAlertDiagram removed (was empty stub)
+function drawAlertDiagram(){}
 
 // (Old diagram functions removed — settings panel simplified)
 
@@ -2253,6 +2242,7 @@ function toggleSettings(){
   document.getElementById('settingsPanel').classList.toggle('open',settingsOpen);
   document.getElementById('settingsBtn').classList.toggle('open',settingsOpen);
   if(settingsOpen){
+    setTimeout(drawAlertDiagram, 50);
     updateDataStatus();
   }
 }
@@ -2333,9 +2323,7 @@ function updateDataStatus(){
 }
 // Update the top-bar timestamp chip once on load (TZ updates when ac.lon changes notably)
 setTimeout(updateDataStatus, 100);
-// Single 30s interval handles both the always-run (every 60s) and settings-open (every 30s) updates
-let _dataStatusTick = 0;
-setInterval(()=>{ _dataStatusTick++; if(settingsOpen || _dataStatusTick % 2 === 0) updateDataStatus(); }, 30000);
+setInterval(updateDataStatus, 60000);
 
 // ═══════════════════════════════════════════════════════════
 // CONFIG (CALIBRATION) MODE — offsets for AIRSPEED / HEADING / ALTITUDE.
@@ -2389,7 +2377,8 @@ async function refreshAllData(){
     updateDataStatus();
   }
 }
-// (interval merged into single 30s timer above)
+// Keep the age labels updating while the panel is open
+setInterval(()=>{ if(settingsOpen) updateDataStatus(); }, 30000);
 function closeSettings(){
   settingsOpen=false;
   document.getElementById('settingsPanel').classList.remove('open');
@@ -2435,13 +2424,9 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      // Base rate: linear up to 250 kt, exponential above
-      let rate = offset * 1.5;
-      if(simSpeedKt > 250){
-        const excess = simSpeedKt - 250;
-        rate *= 1 + (excess * excess) / 40000; // exponential growth above 250
-      }
-      simSpeedKt = Math.max(0, Math.min(6615, simSpeedKt + rate));
+      const rate = offset * 1.5;
+      const scale = simSpeedKt >= 500 ? (1 + (simSpeedKt - 500) / 400) : 1;
+      simSpeedKt = Math.max(0, Math.min(6615, simSpeedKt + rate * scale));
       ac.speedKt = simSpeedKt;
     }
     raf = requestAnimationFrame(tick);
@@ -2478,13 +2463,9 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      // Full swipe = 2000 ft/sec → ~33.3 ft/frame at 60fps
-      let rate = offset * 33.3;
-      if(simAltFt > 10000){
-        const excess = simAltFt - 10000;
-        rate *= 1 + (excess * excess) / 500000000; // exponential growth above 10,000
-      }
-      simAltFt = Math.max(0, Math.min(100000, simAltFt + rate));
+      const rate = offset * 26;
+      const scale = simAltFt >= 10000 ? (1 + (simAltFt - 10000) / 20000) : 1;
+      simAltFt = Math.max(0, Math.min(100000, simAltFt + rate * scale));
       ac.altM = simAltFt * FT_M;
     }
     raf = requestAnimationFrame(tick);
@@ -2523,8 +2504,7 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      // 45 deg/sec at full swipe → 0.75 deg/frame at 60fps
-      const rate = offset * 0.75;
+      const rate = offset * 1.5;
       ac.hdg = normHdg(ac.hdg + rate);
     }
     raf = requestAnimationFrame(tick);
@@ -2843,7 +2823,7 @@ async function showAirportPopup(ap){
           const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
         }
         const ratio = Math.pow(2, dy/window.innerHeight*2);
-        bevRangeNm = Math.max(2, Math.min(100, rangeStart*ratio));
+        bevRangeNm = Math.max(2, Math.min(60, rangeStart*ratio));
       }
     }
   }, {passive:false});
@@ -2871,7 +2851,7 @@ async function showAirportPopup(ap){
       bevAutoRange = false;
       const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
     }
-    bevRangeNm = Math.max(2, Math.min(100, bevRangeNm + e.deltaY*0.05));
+    bevRangeNm = Math.max(2, Math.min(60, bevRangeNm + e.deltaY*0.05));
   }, {passive:false});
 })();
 
@@ -2886,7 +2866,7 @@ function flightUpdate(dt){
     const H       = ac.hdg * D2R;
     const distDeg = distM / 111320;
     ac.lat += Math.cos(H) * distDeg;
-    ac.lon += Math.sin(H) * distDeg / ac._cosLatR;
+    ac.lon += Math.sin(H) * distDeg / Math.cos(ac.lat * D2R);
     // Apply simVSfpm to altitude (fpm -> ft/sec * dt)
     if(Math.abs(simVSfpm) > 1){
       simAltFt = Math.max(0, simAltFt + (simVSfpm / 60) * dt);
@@ -2974,10 +2954,11 @@ function updateCamera(){
   asCamera.projectionMatrixInverse.copy(asCamera.projectionMatrix).invert();
 
   // Keep sun high relative to camera for consistent airspace lighting
-  _scrSunUp.copy(localUp(ac.lat, ac.lon)).multiplyScalar(50000);
-  _scrSunE.copy(localEast(ac.lon)).multiplyScalar(20000);
-  _scrSunN.copy(localNorth(ac.lat, ac.lon)).multiplyScalar(10000);
-  asSun.position.copy(asCamera.position).add(_scrSunUp).add(_scrSunE).add(_scrSunN);
+  const up = localUp(ac.lat, ac.lon);
+  const sunUp = up.clone().multiplyScalar(50000);
+  const sunE  = localEast(ac.lon).multiplyScalar(20000);
+  const sunN  = localNorth(ac.lat, ac.lon).multiplyScalar(10000);
+  asSun.position.copy(asCamera.position).add(sunUp).add(sunE).add(sunN);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3046,7 +3027,7 @@ function rsz(){
   TAPE_W = HW < 600 ? 60 : 60; // all tapes use this width (spd=alt=vs=60px, 1.5x scale)
   // When BEV is on it replaces the compass band — no heading tape
   // Heading tape + gap + corridor bar
-  BOTTOM_TAPE_H = Math.round(53 * 0.75 * 0.90 * 1.25 * 1.15 * (isDesktop ? 1 : 2)); // compass: 2x height on mobile
+  BOTTOM_TAPE_H = Math.round(53 * 0.75 * 0.90 * 1.25 * (isDesktop ? 1 : 2)); // compass: 2x height on mobile
   RANGE_TAPE_H = 0;  // range bar removed
   UPPER_TAPE_GAP = 6; // gap between tapes — matches alt/VSI gap
   // Bottom up: range tape (bottom) + gap + compass tape (top)
@@ -3270,7 +3251,7 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
 
 // ── Distance from aircraft to nearest polygon edge (nm) ──
 function distToPolyNm(as){
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat * D2R);
   const np = as.p.length;
   let best = Infinity;
   for(let vi = 0; vi < np; vi++){
@@ -3401,7 +3382,7 @@ function drawSpdTape(){
 
   // Flash box border if over speed limit
   const overLimit = spdLimit > 0 && kt > spdLimit;
-  const flashOn = overLimit && (_frameNow % 500 < 250);
+  const flashOn = overLimit && (Date.now() % 500 < 250);
 
   h.fillStyle=C.BOX;
   h.strokeStyle = overLimit ? (flashOn ? '#ff3333' : C.BOXBDR) : C.BOXBDR;
@@ -3465,30 +3446,75 @@ function drawAltTape(){
   // pixels per foot — ±2000ft range
   const PX_PER_FT = rh / 4000;
 
-  // ── Airspace bands on altitude tape — depth sensor at current location ──
-  // Only shows airspaces we're actually inside (horizontally).
-  // Chevrons point toward the nearest way to clear the airspace.
-  // Cached — rebuilds when position changes.
+  // ── Airspace bands on altitude tape — forward probe along heading ──
+  // Shows airspaces the aircraft is facing + their buffer altitudes.
+  // Includes: airspaces we're inside, on the heading line, or within horiz buffer of heading line.
+  // Excludes: airspaces 0.1nm+ behind the aircraft.
+  // Cached — rebuilds when position or heading changes.
   const altBands = [];
-  const now = _frameNow;
+  const now = Date.now();
+  const _altCosLat = Math.cos(ac.lat * D2R);
+  const _altSpd = simMode ? simSpeedKt : ac.speedKt;
+  const _altProbeMax = Math.max(10, (_altSpd > 5) ? (_altSpd * 5 / 60) : 10);
+  const _altHdgR = ac.hdg * D2R;
+  const _altCosH = Math.cos(_altHdgR), _altSinH = Math.sin(_altHdgR);
 
-  if(!drawAltTape._cache) drawAltTape._cache = {hits:[], lastLat:0, lastLon:0, lastT:0};
+  if(!drawAltTape._cache) drawAltTape._cache = {hits:[], lastLat:0, lastLon:0, lastHdg:0, lastT:0};
   const _altC = drawAltTape._cache;
-  const _altNow = _frameNow;
+  const _altNow = Date.now();
   const _altPosDelta = Math.abs(ac.lat - _altC.lastLat) + Math.abs(ac.lon - _altC.lastLon);
-  const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002;
+  const _altHdgDelta = Math.abs(ac.hdg - _altC.lastHdg);
+  const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
   if(_altStale){
-    _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastT=_altNow;
-    const hits = [];
-    for(let _i = 0; _i < _nearbyAS.length; _i++){
-      const as = _nearbyAS[_i];
+    _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastHdg=ac.hdg; _altC.lastT=_altNow;
+    const hitSet = new Set();
+    const hitMeta = {}; // idx → {nearestNm}
+    // Include airspaces we're currently inside (on the heading line by definition)
+    for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
+      const as = AIRSPACE_DATA[_i];
       if(!asClassVisible[as.c]) continue;
       if(as.c === 'E') continue;
-      if(pointInPolyAC(as._idx, as)){
-        hits.push({idx: as._idx});
+      if(pointInPolyAC(_i, as)){
+        hitSet.add(_i);
+        hitMeta[_i] = {nearestNm: 0};
+        continue;
       }
     }
-    _altC.hits = hits;
+    // Forward probe along exact heading line
+    for(let nm = 0.5; nm <= _altProbeMax; nm += 0.5){
+      const dd = (nm * 1852) / 111320;
+      const pLat = ac.lat + _altCosH * dd;
+      const pLon = ac.lon + _altSinH * dd / _altCosLat;
+      for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
+        if(hitSet.has(_i)) continue;
+        const as = AIRSPACE_DATA[_i];
+        if(!asClassVisible[as.c]) continue;
+        if(as.c === 'E') continue;
+        if(pointInPoly(pLat, pLon, as.p)){
+          hitSet.add(_i);
+          hitMeta[_i] = {nearestNm: nm};
+        }
+      }
+    }
+    // Behind-aircraft filter: exclude airspaces entirely 0.1nm+ behind
+    const hits = [];
+    for(const _i of hitSet){
+      const as = AIRSPACE_DATA[_i];
+      let maxFwd = -Infinity, minFwd = Infinity;
+      for(let vi = 0; vi < as.p.length; vi++){
+        const dN = (as.p[vi][0] - ac.lat) * 60;
+        const dE = (as.p[vi][1] - ac.lon) * 60 * _altCosLat;
+        const fwd = dN * _altCosH + dE * _altSinH;
+        if(fwd > maxFwd) maxFwd = fwd;
+        if(fwd < minFwd) minFwd = fwd;
+      }
+      if(maxFwd < 0) continue; // exclude anything behind aircraft
+      const fwdDist = Math.max(0, minFwd);
+      hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, fwdDist});
+    }
+    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
+    hits.sort((a,b) => a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
+    _altC.hits = hits.slice(0, 3);
   }
 
   for(const hit of _altC.hits){
@@ -3521,18 +3547,18 @@ function drawAltTape(){
     altBands.push({col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow, pri});
   }
 
-  // Sort by altitude position so bars render in order; within same altitude, alerts on top
+  // Sort by altitude position (lowest floor first) so bars render in order; within same altitude, alerts on top
   altBands.sort((a,b) => a.yActBot - b.yActBot || a.pri - b.pri);
 
   for(const band of altBands){
     const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
 
-    // Clear background for full extent
+    // Show solid actual airspace + hatched buffer altitudes above/below
     h.globalAlpha = 1.0;
     h.fillStyle = C.TAPE;
     h.fillRect(rx, clampTop, rw, clampBot - clampTop);
 
-    // ── Buffer zone ABOVE actual airspace (chevrons point up = escape up) ──
+    // ── Buffer zone ABOVE actual airspace (chevrons point up, away from solid) ──
     const bufAboveTop = Math.max(topY, yBufTop);
     const bufAboveBot = Math.min(botY, yActTop);
     if(bufAboveBot > bufAboveTop){
@@ -3547,7 +3573,7 @@ function drawAltTape(){
       h.globalAlpha = 1.0;
     }
 
-    // ── Buffer zone BELOW actual airspace (chevrons point down = escape down) ──
+    // ── Buffer zone BELOW actual airspace (chevrons point down, away from solid) ──
     const bufBelowTop = Math.max(topY, yActBot);
     const bufBelowBot = Math.min(botY, yBufBot);
     if(bufBelowBot > bufBelowTop){
@@ -3667,9 +3693,9 @@ function drawAltTape(){
 
     // Scan airspaces ahead at current heading
     const _fwdHdgR = (ac.hdg + lookOffset) * D2R;
-    const _fwdCosLat = ac._cosLatR;
+    const _fwdCosLat = Math.cos(ac.lat * D2R);
     const _fwdSpd = Math.max(1, simMode ? simSpeedKt : ac.speedKt);
-    const _fwdNow = _frameNow;
+    const _fwdNow = Date.now();
 
     // Throttle: reuse cached results if position hasn't changed much
     if(!drawAltTape._fwdCache) drawAltTape._fwdCache = {lat:0,lon:0,alt:0,hdg:0,t:0,bands:[]};
@@ -3691,9 +3717,8 @@ function drawAltTape(){
         const distDeg = (nm*1852)/111320;
         const pLat = ac.lat + Math.cos(_fwdHdgR)*distDeg;
         const pLon = ac.lon + Math.sin(_fwdHdgR)*distDeg/_fwdCosLat;
-        for(let _ni=0; _ni<_nearbyAS.length; _ni++){
-          const as = _nearbyAS[_ni];
-          const _fi = as._idx;
+        for(let _fi=0; _fi<AIRSPACE_DATA.length; _fi++){
+          const as = AIRSPACE_DATA[_fi];
           if(!asClassVisible[as.c]) continue;
           if(as.t + clearanceFt < scanBotFt || as.b - clearanceFt > scanTopFt) continue;
           if(pointInPolyAC(_fi, as) && aft >= as.b && aft <= as.t) continue;
@@ -3872,9 +3897,9 @@ function drawRangeBar(){
 
   // ── Probe left and right — find closest airspace on each side ──
   const MAX_RANGE_NM = 2.5;
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat * D2R);
   const aft = simMode ? simAltFt : ac.altM / FT_M;
-  const nowF = _frameNow;
+  const nowF = Date.now();
   const leftHdgR = (ac.hdg - 90) * D2R;
   const rightHdgR = (ac.hdg + 90) * D2R;
 
@@ -3884,10 +3909,10 @@ function drawRangeBar(){
       const dd=(nm*1852)/111320;
       const pLat=ac.lat+Math.cos(hdgR)*dd;
       const pLon=ac.lon+Math.sin(hdgR)*dd/cosLat;
-      for(const as of _nearbyAS){
+      for(const as of AIRSPACE_DATA){
         if(!asClassVisible[as.c]) continue;
         if(aft < (as.b - clearanceFt) || aft > (as.t + clearanceFt)) continue;
-        if(pointInPolyAC(as._idx, as)) continue;
+        if(pointInPoly(ac.lat,ac.lon,as.p)) continue;
         if(pointInPoly(pLat,pLon,as.p)) return {as, nm};
       }
     }
@@ -3968,12 +3993,6 @@ function drawRangeBar(){
   h.restore();
 }
 
-// ── Reusable buffers for compass/BEV bearing scans (avoid per-frame allocation) ──
-const _hdgOwner = new Array(360);
-const _hdgTier  = new Uint8Array(360);
-const _bevOwner = new Array(360);
-const _bevTier  = new Uint8Array(360);
-
 // ── SCROLLING HEADING TAPE with airspace bars ──
 function drawHdgTape(){
   const hdgTapeH = BOTTOM_TAPE_H;
@@ -4009,8 +4028,8 @@ function drawHdgTape(){
   // ── Collect all compass bars, then draw sorted: white→yellow→red (red on top) ──
   const barH = th - 2;
   const barY = ty + 1;
-  const cosLat = ac._cosLatR;
-  const nowT = _frameNow;
+  const cosLat = Math.cos(ac.lat * D2R);
+  const nowT = Date.now();
   const hdgBars = []; // {x, w, col, isRed, isYellow, pri}
 
   // --- Compass: 3-tier priority system ---
@@ -4021,7 +4040,7 @@ function drawHdgTape(){
   const _hdgSpd = simMode ? simSpeedKt : ac.speedKt;
   if(!drawHdgTape._cache) drawHdgTape._cache = {airspaces:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
   const _cc = drawHdgTape._cache;
-  const _cNow = _frameNow;
+  const _cNow = Date.now();
   const _posDelta = Math.abs(ac.lat - _cc.lastLat) + Math.abs(ac.lon - _cc.lastLon);
   const _altDelta = Math.abs(aft - _cc.lastAft);
   const _spdDelta = Math.abs(_hdgSpd - _cc.lastSpd);
@@ -4033,14 +4052,13 @@ function drawHdgTape(){
     // Build candidates — same altitude + buffer altitude
     // Per-airspace logic: actual same-alt → solid; any buffer → hatched
     const cand = [];
-    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
-      const as = _nearbyAS[_ni];
-      const ai = as._idx;
+    for(let ai = 0; ai < AIRSPACE_DATA.length; ai++){
+      const as = AIRSPACE_DATA[ai];
       if(!asClassVisible[as.c]) continue;
-      // Include same altitude AND vertical buffer altitude
-      if(aft < (as.b - clearanceFt) || aft > (as.t + clearanceFt)) continue;
-      const atSameAlt = (aft >= as.b && aft <= as.t);
-      if(atSameAlt && pointInPolyAC(ai, as)) continue; // inside at same alt — skip
+      // Only show airspaces at current altitude — compass guides horizontal escape
+      if(aft < as.b || aft > as.t) continue;
+      const atSameAlt = true;
+      if(pointInPolyAC(ai, as)) continue; // inside — skip
       // Skip airspaces entirely behind the aircraft
       const _cHdgR = hdg * D2R;
       const _cCosH = Math.cos(_cHdgR), _cSinH = Math.sin(_cHdgR);
@@ -4125,12 +4143,15 @@ function drawHdgTape(){
     }
     // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
     cand.sort((a,b)=>a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
+    // Keep only top 3 closest airspaces
+    if(cand.length > 3) cand.length = 3;
+
     // 2-pass degree scan — per-airspace priority:
     // Pass 1 (solid): actual same-altitude airspace bearing → tier 1
     // Pass 2 (hatched): any buffer (horiz buffer of same-alt OR buffer-altitude bearing) → tier 2
     // Solid always overrides hatched at any degree.
-    const owner = _hdgOwner; owner.fill(null);
-    const tier = _hdgTier; tier.fill(0);
+    const owner = new Array(360);
+    const tier = new Uint8Array(360);
 
     // PASS 1: Actual same-altitude airspaces (solid) — highest priority
     for(let b=0;b<360;b++){
@@ -4144,39 +4165,27 @@ function drawHdgTape(){
         if(hit){ owner[b] = c; tier[b] = 1; break; }
       }
     }
-    // PASS 2: Buffer zones — only unclaimed degrees within ±60° of heading
-    // Includes: horizontal buffer of same-alt airspaces AND buffer-altitude airspaces (full bearing)
+    // PASS 2: Horizontal buffer of same-alt airspaces — only unclaimed degrees within ±60° of heading
     for(let b=0;b<360;b++){
       if(tier[b]) continue; // solid wins
       let _brgOff = b - hdg; if(_brgOff > 180) _brgOff -= 360; if(_brgOff < -180) _brgOff += 360;
       if(Math.abs(_brgOff) > 60) continue;
       for(const c of cand){
-        if(c.atSameAlt){
-          // Same-alt: only the horizontal buffer expansion (not the actual intervals)
-          if(!c.bufIntervals.length) continue;
-          let inBuf = false;
-          for(const iv of c.bufIntervals){
-            if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inBuf=true; break; } }
-            else { if(b >= iv.lo || b <= iv.hi){ inBuf=true; break; } }
-          }
-          if(!inBuf) continue;
-          // Must NOT be in actual interval (those are solid in pass 1)
-          let inActual = false;
-          for(const iv of c.intervals){
-            if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inActual=true; break; } }
-            else { if(b >= iv.lo || b <= iv.hi){ inActual=true; break; } }
-          }
-          if(inActual) continue;
-          owner[b] = c; tier[b] = 2; break;
-        } else {
-          // Buffer-altitude: entire bearing range is hatched (within vertical buffer but not same alt)
-          let hit = false;
-          for(const iv of c.intervals){
-            if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ hit=true; break; } }
-            else { if(b >= iv.lo || b <= iv.hi){ hit=true; break; } }
-          }
-          if(hit){ owner[b] = c; tier[b] = 2; break; }
+        if(!c.bufIntervals.length) continue;
+        let inBuf = false;
+        for(const iv of c.bufIntervals){
+          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inBuf=true; break; } }
+          else { if(b >= iv.lo || b <= iv.hi){ inBuf=true; break; } }
         }
+        if(!inBuf) continue;
+        // Must NOT be in actual interval (those are solid in pass 1)
+        let inActual = false;
+        for(const iv of c.intervals){
+          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inActual=true; break; } }
+          else { if(b >= iv.lo || b <= iv.hi){ inActual=true; break; } }
+        }
+        if(inActual) continue;
+        owner[b] = c; tier[b] = 2; break;
       }
     }
 
@@ -4199,7 +4208,7 @@ function drawHdgTape(){
 
   // Alert tiering & drawing
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
-  const nowF = _frameNow;
+  const nowF = Date.now();
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
   const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
   const hdgSolid = [];
@@ -4226,11 +4235,9 @@ function drawHdgTape(){
       const x2 = cx + hi * PX_PER_DEG;
       const bw = Math.max(x2-x1, 2) + 1;
       const bx = x1 - 0.5;
-      const pri = isR ? 2 : isY ? 1 : 0;
-      const _isAlert = isR || isY;
       if(a.tier === 1){
         // Tier 1: actual same-altitude — solid fill
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, pri, _alert:_isAlert});
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50});
       } else {
         // Tier 2: buffer — chevrons indicating horizontal escape direction
         if(a.owner.atSameAlt){
@@ -4246,44 +4253,20 @@ function drawHdgTape(){
             drawX = bx;
             drawW = Math.max(bx + bw, centerX) - bx;
           }
-          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, pri, _alert:_isAlert});
-        } else {
-          // Buffer-altitude airspace — split at center bearing, chevrons point outward
-          const cRel = a.centerBrg - hdg + shift;
-          const centerX = cx + cRel * PX_PER_DEG;
-          const barLeft = bx, barRight = bx + bw;
-          // Left half: chevrons point left (away from center)
-          if(centerX > barLeft){
-            const leftW = Math.min(centerX, barRight) - barLeft;
-            if(leftW > 1) hdgHatch.push({x:barLeft, w:leftW, clipX:barLeft, clipW:leftW, col:a.col, dir:'left', pri, _alert:_isAlert});
-          }
-          // Right half: chevrons point right (away from center)
-          if(centerX < barRight){
-            const rightX = Math.max(centerX, barLeft);
-            const rightW = barRight - rightX;
-            if(rightW > 1) hdgHatch.push({x:rightX, w:rightW, clipX:rightX, clipW:rightW, col:a.col, dir:'right', pri, _alert:_isAlert});
-          }
+          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir});
         }
       }
       if(isR || isY){
         const show = isR ? redFlash : yelFlash;
         if(show){
-          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60, pri});
+          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60});
         }
       }
     }
   }
 
-  // ── Sort by priority: white(0) → yellow(1) → red(2) so red draws last (on top) ──
-  const priSort = (a,b) => a.pri - b.pri;
-  hdgHatch.sort(priSort);
-  hdgSolid.sort(priSort);
-  hdgOverlays.sort(priSort);
-
-  // ── Draw: non-alert bars first, then alert bars + overlays on top ──
-  // Pass 1: non-alert hatched bars
+  // ── Draw: hatched first (clipped to buffer bounds), solid on top, then alert overlays ──
   for(const bar of hdgHatch){
-    if(bar._alert) continue;
     h.save();
     h.beginPath();
     h.rect(bar.clipX, barY, bar.clipW, barH);
@@ -4291,31 +4274,11 @@ function drawHdgTape(){
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
     h.restore();
   }
-  // Pass 1: non-alert solid bars
   for(const bar of hdgSolid){
-    if(bar._alert) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
   }
-  // Pass 2: alert hatched bars (drawn on top)
-  for(const bar of hdgHatch){
-    if(!bar._alert) continue;
-    h.save();
-    h.beginPath();
-    h.rect(bar.clipX, barY, bar.clipW, barH);
-    h.clip();
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
-    h.restore();
-  }
-  // Pass 2: alert solid bars (drawn on top)
-  for(const bar of hdgSolid){
-    if(!bar._alert) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a;
-    h.fillRect(bar.x, barY, bar.w, barH);
-    h.globalAlpha = 1;
-  }
-  // Pass 3: alert overlays (highest z — always on top of everything)
   for(const bar of hdgOverlays){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
@@ -4411,7 +4374,7 @@ function drawAirports(){
   // skip any airport outside a 1.0° lat window (60nm) — avoids per-airport
   // haversine + Three.js project() + localToWorld() calls for 95% of the list.
   const _apCutLat = 60/60; // 1° lat ≈ 60nm
-  const _cosAcLat = ac._cosLatR;
+  const _cosAcLat = Math.cos(ac.lat*D2R);
   const _apCutLon = 60/(60*Math.max(0.1,_cosAcLat));
   AIRPORTS.forEach(ap=>{
     if(/\d/.test(ap.id)) return;
@@ -4467,7 +4430,7 @@ function drawAirports(){
 
 // ── AIRPORT INFO PANEL (drawn last, above all alerts) ──
 function drawAirportInfoPanel(){
-  const nowMs = _frameNow;
+  const nowMs = Date.now();
   const candidates = window._apCandidates || [];
   if(_tappedAp && (nowMs - _tappedApAt) < _AP_INFO_MS){
     let target = null;
@@ -4590,7 +4553,7 @@ let _cachedAutoAltRange = {yMin:0, yMax:10000};
 function calcAutoAltRange(aft){
   if(!shouldUpdate('autoAlt', 500)) return _cachedAutoAltRange;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat * D2R);
   let highest = aft + 1000;
   let lowestFloor = Infinity;
 
@@ -4626,7 +4589,7 @@ let _cachedAutoProfRange = 25;
 function calcAutoProfileRange(){
   if(!shouldUpdate('autoProf', 500)) return _cachedAutoProfRange;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat * D2R);
   const aft = simMode ? simAltFt : ac.altM / FT_M;
 
   // Find the NEAREST airspace (at current altitude) that the heading line
@@ -4735,9 +4698,6 @@ function toggleAirports(){
   toast(showAirports ? 'Airports ON' : 'Airports OFF', 2000);
 }
 
-// ── Shared VS formatter (hoisted to avoid per-frame closure re-creation) ──
-function fmtVS(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
-
 // ── CROSS-SECTION PROFILE VIEW (rebuilt from scratch) ────
 function drawProfile(){
   if(!profileOn || !profCtx) return;
@@ -4760,7 +4720,7 @@ function drawProfile(){
   // ── State ──
   const aft  = simMode ? simAltFt : ac.altM / FT_M;
   const hdgR = (ac.hdg + lookOffset) * D2R;
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat * D2R);
 
   // ── X axis ──
   if(profileAutoRange) profileRangeNm = calcAutoProfileRange();
@@ -4811,7 +4771,7 @@ function drawProfile(){
   }
 
   // ── Airspace blocks ──
-  const now=_frameNow;
+  const now=Date.now();
   // PERF: iterate _nearbyAS (bbox-filtered per frame) instead of ALL airspace.
   // For each one, also skip if the probe segment (±profileRange along heading)
   // can't possibly hit its bbox. Cuts airspace scan work by ~90%.
@@ -4928,7 +4888,7 @@ function drawProfile(){
         p.strokeStyle = 'rgba(255,102,255,.9)';
         p.lineWidth = 2;
         p.beginPath(); p.moveTo(ax, ay); p.lineTo(ex, ey); p.stroke();
-
+        // (projection dots removed — clean line only)
       }
     }
   }
@@ -5026,14 +4986,14 @@ function drawProfile(){
 
   // ── Airspace VS danger-zone bars (VS range that enters airspace) ──
   const _spdKtVS=Math.max(1, simMode?simSpeedKt:ac.speedKt);
-  const _nowTP=_frameNow;
+  const _nowTP=Date.now();
   // Find the single nearest airspace along heading (occlusion — only show what you're heading into)
   // PERF: pre-filter airspaces to those whose bbox the heading probe might hit,
   // and cache the "aircraft-inside" check via pointInPolyAC so it isn't redone
   // 100+ times inside the probe loop.
   let nearestASP=null, nearestNmP=Infinity;
   const _hdgR_vs = ac.hdg*D2R;
-  const _cosLat_vs = ac._cosLatR;
+  const _cosLat_vs = Math.cos(ac.lat*D2R);
   const _vsCandidates = [];
   for(let _vci=0;_vci<_nearbyAS.length;_vci++){
     const as=_nearbyAS[_vci];
@@ -5064,7 +5024,7 @@ function drawProfile(){
     const minToAsP=secToAsP/60;
     const vsToFloorP=(as.b-aft)/minToAsP;
     const vsToCeilP=(as.t-aft)/minToAsP;
-    // fmtVSp removed — using hoisted fmtVS
+    function fmtVSp(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
     // Airspace-bar alert: thresholds apply to |required VS value| on the airspace bar.
     // Aircraft VS does NOT trigger alerts — only the airspace bar does.
     function vsAlertP(edgeVal){
@@ -5092,20 +5052,10 @@ function drawProfile(){
         const a = vsAlertP(ceilValP);
         addFlashOverlay(y1c, fillHc, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y1c)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
-        bkL+='<div style="position:absolute;left:2px;top:'+(y1c-12)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVS(ceilValP)+'</div>';
+        bkL+='<div style="position:absolute;left:2px;top:'+(y1c-12)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(ceilValP)+'</div>';
       }
     }
     // --- BOTTOM HALF: floor zone (negative VS / descending) ---
-    if(as.b <= 0){
-      // Airspace goes to surface — no VS can clear below it
-      const sfcYP = vsToY(0) + 4;
-      bkL+='<div style="position:absolute;left:2px;top:'+sfcYP+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">SFC</div>';
-      // Solid red flashing fill to indicate no escape down
-      const _sfcFlashP = Math.floor(_frameNow/250) % 2 === 0;
-      if(_sfcFlashP){
-        bkL+='<div style="position:absolute;left:0;right:0;top:'+sfcYP+'px;height:'+(bHL-sfcYP)+'px;background:#ff3333;opacity:0.65;pointer-events:none"></div>';
-      }
-    } else {
     const floorValP=Math.min(vsToFloorP,vsToCeilP);
     if(floorValP<0){
       const zBotP=Math.max(-vsRange,floorValP);
@@ -5117,10 +5067,9 @@ function drawProfile(){
         const a = vsAlertP(floorValP);
         addFlashOverlay(y1f, fillHf, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y2f)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
-        bkL+='<div style="position:absolute;left:2px;top:'+(y2f+2)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVS(floorValP)+'</div>';
+        bkL+='<div style="position:absolute;left:2px;top:'+(y2f+2)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(floorValP)+'</div>';
       }
     }
-    } // end non-surface floor
     } // secToAsP>0
   } // nearestASP
 
@@ -5209,7 +5158,7 @@ function drawProfile(){
   }
   // MIN label at left edge
   tk+='<div style="position:absolute;left:2px;top:3px;font:9px var(--mono);color:rgba(255,255,255,.5);pointer-events:none;letter-spacing:.05em">MIN</div>';
-  if(!drawProfile._lastTime||window._frameNow-drawProfile._lastTime>100){tb.innerHTML=tk;drawProfile._lastTime=window._frameNow;}
+  tb.innerHTML=tk;
 }
 
 // ── HORIZON LINE ──────────────────────────────────────────
@@ -5352,10 +5301,6 @@ function getFAASpeedLimit(altFt, lat, lon){
 // Airspace class priority: B > C > D > RESTRICTED (lower = higher priority)
 const CLASS_PRIORITY = {B:0, C:1, D:2, RESTRICTED:3, PROHIBITED:3};
 
-// Reusable sets for getAirspaceAhead (avoid per-call allocation)
-const _gaFoundKeys = new Set();
-const _gaFoundClasses = new Set();
-
 function getAirspaceAhead(maxResults){
   // Throttle to every 2s — reuse cached result otherwise
   if(!shouldUpdate('asAhead', 2000)) return _cachedAirspaceAhead;
@@ -5364,12 +5309,12 @@ function getAirspaceAhead(maxResults){
   const D2R  = Math.PI/180;
   const lookHdg = ac.hdg + lookOffset;
   const hdgR = lookHdg * D2R;
-  const cosLat = ac._cosLatR;
+  const cosLat = Math.cos(ac.lat*D2R);
   const pitchTan = Math.tan(lookPitchOffset * D2R);
 
   const found = []; // {as, nm}
-  const foundKeys = _gaFoundKeys; foundKeys.clear();
-  const foundClasses = _gaFoundClasses; foundClasses.clear();
+  const foundKeys = new Set();
+  const foundClasses = new Set(); // skip same class behind first hit
 
   // PERF: iterate only nearby airspaces that the look-direction probe
   // segment could possibly intersect. Huge reduction on full-scan work.
@@ -5680,8 +5625,8 @@ function drawBirdsEye(){
   // (The map-pan handler mutates ac.hdg directly; the 3D-HUD pan mutates lookOffset.
   //  Using the sum keeps the rose, the heading tape, and the 3D camera all in lockstep.)
   const hdg = normHdg(ac.hdg + lookOffset);
-  const cosLat = ac._cosLatR;
-  const nowT = _frameNow;
+  const cosLat = Math.cos(ac.lat * D2R);
+  const nowT = Date.now();
 
   // Compass rose geometry
   const mapOnly = bevOn && !profileOn;
@@ -5694,29 +5639,14 @@ function drawBirdsEye(){
   // roseR constrained so 1.5*roseR + headRoom <= H (fade bottom = H)
   {
     const headRoom = 42; // room for heading box (22px) + triangle (9px) + gap above rose
-    const labelMargin = 14; // labels drawn at roseR + 14 from center
-    const ribW = window._cachedRibW||(window._cachedRibW=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--ribW'))||80);
-    // Desktop both: use bevDiv width (W); otherwise use main 3D div width minus side tapes
-    const availW = (isDesktopBev && bothMode) ? W : ((HW || W) - 2 * ribW);
-    roseR = (availW / 2 - labelMargin) * 0.90; // 10% shrink
-
-    if(isDesktopBev && bothMode){
-      // Non-mobile both: show entire compass rose, centered in div
-      // Full circle needs: 2*(roseR + labelMargin) vertically for labels
-      const maxByH = (H / 2) - labelMargin; // roseR + labelMargin ≤ H/2
-      roseR = Math.min(roseR, maxByH);
-      cy = H / 2; // center vertically
-    } else {
-      // Cap so heading text box (cy - roseR - 35) stays visible at top of div
-      const maxByTop = (H - 35) / 1.5;
-      roseR = Math.min(roseR, maxByTop);
-      // Pin bottom: cutY = cy + roseR*0.5 aligned to div bottom (H)
-      cy = H - roseR * 0.5;
-    }
+    roseR = Math.min(W * 0.48, (H - headRoom) / 1.5);
+    // Shrink compass rose to 90% on mobile to keep headings inside
+    if(W < 600) roseR *= 0.90;
+    cy = roseR + headRoom;
   }
   // Stash rose geometry (canvas-local px) so pan handlers can do angular rotation
   window._bevRose = { cx, cy, r: roseR };
-  const bandW = Math.max(6, roseR * (isDesktopBev ? 0.06 : 0.12)); // mobile: 2x thick
+  const bandW = Math.max(6, roseR * 0.06); // alert arc band width
 
   // Apply AUTO RANGE if enabled: fit the map to the airspace I'm about to enter
   // so the ENTIRE airspace ahead is visible with minimal extra margin.
@@ -5725,8 +5655,8 @@ function drawBirdsEye(){
     bevRangeNm = calcAutoProfileRange();
   }
   // Manual zoom clamp — pinch/wheel allowed between 2 and 60 nm
-  bevRangeNm = Math.max(2, Math.min(100, bevRangeNm));
-  const scale = (roseR - bandW) / bevRangeNm; // nm to px within thickest band
+  bevRangeNm = Math.max(2, Math.min(60, bevRangeNm));
+  const scale = (roseR - bandW) / bevRangeNm; // nm to px within rose
 
   function toScreen(lat, lon){
     const dLatNm = (lat - ac.lat) * 60;
@@ -5737,13 +5667,11 @@ function drawBirdsEye(){
     return { x: cx + rx * scale, y: cy + ry * scale };
   }
 
-  // ── Clip: cut off bottom 25% of circle (show top 75%) — skip for desktop both (full rose) ──
-  const desktopBothFull = isDesktopBev && bothMode;
-  const cutY = desktopBothFull ? H : (cy + roseR * 0.5);
-
+  // ── Horizontal clip: cut off bottom quarter of rose ──
+  const cutY = cy + roseR * 0.5; // horizontal line hiding bottom 25%
   g.save(); // outer clip
   g.beginPath();
-  g.rect(0, 0, W, cutY);
+  g.rect(cx - roseR - 60, cy - roseR - 60, (roseR + 60) * 2, cutY - (cy - roseR - 60));
   g.clip();
 
   // ── Dark circle background with fade-to-transparent edge ──
@@ -5757,7 +5685,7 @@ function drawBirdsEye(){
   g.fillStyle = bgGrad;
   g.fill();
 
-  // ── Clip all map content to circle interior (inside thickest band) ──
+  // ── Clip all map content to circle interior ──
   g.beginPath(); g.arc(cx, cy, roseR - bandW, 0, Math.PI*2); g.closePath();
   g.clip();
 
@@ -5832,8 +5760,10 @@ function drawBirdsEye(){
 
     // Alert determination (forward-only, lateral probe removed)
     const secTo = (spd > 5 && fwdNm < Infinity) ? (fwdNm / spd) * 3600 : Infinity;
-    const isRed = fwdNm <= warnRedNm || secTo <= warnRedSec;
-    const isYellow = !isRed && (fwdNm <= warnYelNm || secTo <= warnYelSec);
+    const fwdRed = fwdNm <= warnRedNm || secTo <= warnRedSec;
+    const fwdYel = !fwdRed && (fwdNm <= warnYelNm || secTo <= warnYelSec);
+    const isRed = fwdRed;
+    const isYellow = !isRed && fwdYel;
     const pri = isRed ? 2 : isYellow ? 1 : 0;
 
     // Draw polygon (clipped to rose)
@@ -5848,16 +5778,25 @@ function drawBirdsEye(){
       g.fillStyle = col; g.globalAlpha = 0.15 * dimMul; g.fill(); g.globalAlpha = 1;
     } else if(isRed || isYellow){
       const alertCol = isRed ? C.RED : C.YEL;
-      if(isRed ? redFlash : yelFlash){ g.fillStyle = alertCol; g.globalAlpha = 0.25 * dimMul; g.fill(); g.globalAlpha = 1; }
+      const show = alertFlashOn
+        ? (isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+      if(show){ g.fillStyle = alertCol; g.globalAlpha = 0.25 * dimMul; g.fill(); g.globalAlpha = 1; }
     } else if(atAlt){
       g.fillStyle = col; g.globalAlpha = 0.08; g.fill(); g.globalAlpha = 1;
     } else {
       g.fillStyle = col; g.globalAlpha = 0.06 * dimMul; g.fill(); g.globalAlpha = 1;
     }
-    // Stroke/outline
+    // Stroke/outline — prominent lines when AUTO AIRSPACE is OFF (all airspaces visible)
     g.strokeStyle = col;
-    g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
-    g.globalAlpha = insideAs ? 0.9 : (!bevAirspaceShow || atAlt) ? 0.80 : 0.35;
+    if(!bevAirspaceShow){
+      // AUTO OFF: all airspaces shown with same style as at-alt
+      g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
+      g.globalAlpha = insideAs ? 0.9 : 0.80;
+    } else {
+      // AUTO ON: only at-alt shown; dimmed non-at-alt already filtered out
+      g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
+      g.globalAlpha = insideAs ? 0.9 : atAlt ? 0.80 : 0.35;
+    }
     g.stroke(); g.globalAlpha = 1;
 
     // Class label
@@ -5911,24 +5850,13 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    // Compute center bearing for chevron direction
-    let _rcBrg = 0;
-    if(_ivs.length === 1){
-      _rcBrg = (_ivs[0].lo + _ivs[0].hi) / 2;
-    } else if(_ivs.length === 2){
-      const _rcAll = [];
-      for(const iv of _ivs){ _rcAll.push(iv.lo); _rcAll.push(iv.hi); }
-      let _rcSum = 0;
-      for(const a of _rcAll){ let d = a - _rcAll[0]; if(d < -180) d+=360; if(d>180) d-=360; _rcSum+=d; }
-      _rcBrg = ((_rcAll[0] + _rcSum/_rcAll.length) % 360 + 360) % 360;
-    }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, centerBrg: _rcBrg});
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
   // Occlusion pass — nearest-first 1° scan, merge contiguous same-owner sweeps.
   roseCand.sort((a,b)=>a.nearestNm - b.nearestNm);
   {
-    const owner = _bevOwner; owner.fill(null);
+    const owner = new Array(360);
     for(let b=0;b<360;b++){
       for(const c of roseCand){
         let hit = false;
@@ -5949,8 +5877,7 @@ function drawBirdsEye(){
             startDeg: cur.lo - hdg,
             endDeg:   cur.hi - hdg,
             col: cur.owner.col,
-            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri,
-            centerBrg: cur.owner.centerBrg
+            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
           });
         }
         cur = o ? {owner:o, lo:b, hi:b} : null;
@@ -5961,8 +5888,7 @@ function drawBirdsEye(){
         startDeg: cur.lo - hdg,
         endDeg:   cur.hi - hdg,
         col: cur.owner.col,
-        isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri,
-        centerBrg: cur.owner.centerBrg
+        isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
       });
     }
   }
@@ -6018,107 +5944,40 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── Compass rose edge: uniform arc band with compass-tape-style airspace display ──
-  {
-    g.beginPath();
-    g.arc(cx, cy, roseR - bandW/2, 0, Math.PI*2);
-    g.strokeStyle = 'rgba(0,0,0,.30)';
-    g.lineWidth = bandW;
-    g.stroke();
-  }
-
-  // ── Reuse compass tape cached airspace data for rose band ──
-  // drawHdgTape._cache.airspaces has: {owner, col, lo, hi, nearestNm, tier, centerBrg}
-  // tier 1 = solid (same-alt actual), tier 2 = hatched (buffer)
-  const _tapeCache = (typeof drawHdgTape !== 'undefined' && drawHdgTape._cache) ? drawHdgTape._cache.airspaces : [];
-  const redFlash = alertFlashOn ? (Math.floor(nowT/250) % 2 === 0) : true;
-  const yelFlash = alertFlashOn ? (Math.floor(nowT/500) % 2 === 0) : true;
-
-  // Collect rose-band bars: hatch first, then solid, then alert overlays
-  const roseBandHatch = [];
-  const roseBandSolid = [];
-  const roseBandAlert = [];
-
-  for(const a of _tapeCache){
-    const effNm = Math.max(0, a.nearestNm - horizBufferNm);
-    const secTo = (spd > 5) ? (effNm / spd) * 3600 : Infinity;
-    const isR = (effNm <= warnRedNm || secTo <= warnRedSec);
-    const isY = !isR && (effNm <= warnYelNm || secTo <= warnYelSec);
-    const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
-    if(!isR && !isY && !isW) continue;
-
-    // Bar center vs airspace center → escape direction
-    const barMidBrg = ((a.lo + a.hi) / 2) % 360;
-    let diffFC = barMidBrg - a.centerBrg;
-    if(diffFC > 180) diffFC -= 360; if(diffFC < -180) diffFC += 360;
-    const escDir = (diffFC >= 0) ? 'right' : 'left';
-
-    for(const shift of [-360, 0, 360]){
-      const loDeg = a.lo - hdg + shift;
-      const hiDeg = a.hi - hdg + shift;
-      if(hiDeg < -180 || loDeg > 180) continue;
-
-      if(a.tier === 1){
-        // Solid — same-altitude actual airspace
-        roseBandSolid.push({loDeg, hiDeg, col: a.col, a: 0.50});
-      } else {
-        // Hatched — buffer
-        roseBandHatch.push({loDeg, hiDeg, col: a.col, dir: escDir, centerBrg: a.centerBrg, shift});
-      }
-      if(isR || isY){
-        const show = isR ? redFlash : yelFlash;
-        if(show) roseBandAlert.push({loDeg, hiDeg, col: isR ? C.RED : C.YEL, a: isR ? 0.70 : 0.60});
-      }
-    }
-  }
-
-  // Helper: draw an arc-band fill between two degree offsets from heading
-  function drawArcBand(loDeg, hiDeg, col, alpha){
-    const a1 = (loDeg - 90) * D2R, a2 = (hiDeg - 90) * D2R;
-    g.beginPath(); g.arc(cx, cy, roseR - bandW/2, a1, a2);
-    g.strokeStyle = col; g.lineWidth = bandW; g.globalAlpha = alpha;
-    g.stroke(); g.globalAlpha = 1;
-  }
-
-  // Helper: draw hatched arc-band
-  function drawArcHatch(loDeg, hiDeg, col, dir){
-    const outerR = roseR;
-    const innerR = roseR - bandW;
-    const stepDeg = 3;
-    const sign = (dir === 'right') ? 1 : -1;
-    const slant = 1.5;
-    g.strokeStyle = col;
-    g.lineWidth = 1.5;
-    g.globalAlpha = 0.45;
-    const startD = Math.floor(loDeg / stepDeg) * stepDeg;
-    for(let d = startD; d <= hiDeg; d += stepDeg){
-      if(d < loDeg) continue;
-      const a1 = (d - 90) * D2R;
-      const a2 = (d + slant * sign - 90) * D2R;
-      g.beginPath();
-      g.moveTo(cx + innerR * Math.cos(a1), cy + innerR * Math.sin(a1));
-      g.lineTo(cx + outerR * Math.cos(a2), cy + outerR * Math.sin(a2));
-      g.stroke();
-    }
-    g.globalAlpha = 1;
-  }
-
-  // Draw hatch bars, solid bars, alert overlays, then roseArcs
-  for(const bar of roseBandHatch) drawArcHatch(bar.loDeg, bar.hiDeg, bar.col, bar.dir);
-  for(const bar of roseBandSolid) drawArcBand(bar.loDeg, bar.hiDeg, bar.col, bar.a);
-  for(const bar of roseBandAlert) drawArcBand(bar.loDeg, bar.hiDeg, bar.col, bar.a);
+  // ── Compass rose edge: alert arc bars (drawn outside clip, on the band) ──
   roseArcs.sort((a,b) => a.pri - b.pri);
   for(const arc of roseArcs){
-    drawArcBand(arc.startDeg, arc.endDeg, arc.col, 0.5);
+    const a1 = (arc.startDeg - 90) * D2R;
+    const a2 = (arc.endDeg - 90) * D2R;
+
+    // Base color arc
+    g.beginPath();
+    g.arc(cx, cy, roseR - bandW/2, a1, a2);
+    g.strokeStyle = arc.col;
+    g.lineWidth = bandW;
+    g.globalAlpha = 0.5;
+    g.stroke();
+    g.globalAlpha = 1;
+
+    // Alert overlay
     if(arc.isRed || arc.isYellow){
-      if(arc.isRed ? redFlash : yelFlash) drawArcBand(arc.startDeg, arc.endDeg, arc.isRed ? C.RED : C.YEL, 0.75);
+      const show = alertFlashOn
+        ? (arc.isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+      if(show){
+        g.beginPath();
+        g.arc(cx, cy, roseR - bandW/2, a1, a2);
+        g.strokeStyle = arc.isRed ? C.RED : C.YEL;
+        g.lineWidth = bandW;
+        g.globalAlpha = 0.75;
+        g.stroke();
+        g.globalAlpha = 1;
+      }
     }
   }
 
-  // ── Compass rose ring borders ──
+  // ── Compass rose ring border ──
   g.strokeStyle = 'rgba(255,255,255,.25)';
   g.lineWidth = 1;
-  // Outer ring
   g.beginPath(); g.arc(cx, cy, roseR, 0, Math.PI*2); g.stroke();
   g.beginPath(); g.arc(cx, cy, roseR - bandW, 0, Math.PI*2); g.stroke();
 
@@ -6140,11 +5999,17 @@ function drawBirdsEye(){
     g.lineWidth = major ? 1.2 : 0.7;
     g.beginPath(); g.moveTo(ox, oy); g.lineTo(ix, iy); g.stroke();
     if(major){
-      const lbl = d===0||d===360 ? 'N' : d===90 ? 'E' : d===180 ? 'S' : d===270 ? 'W' : String(d);
-      const isCard = d===0||d===360||d===90||d===180||d===270;
-      g.fillStyle = (d===0||d===360) ? C.MAGENTA : C.WHITE;
-      g.font = (isCard ? "bold " : "") + "14px 'Share Tech Mono',monospace";
-      const lr = roseR + 14;
+      let lbl;
+      if(d === 0 || d === 360) lbl = 'N';
+      else if(d === 90) lbl = 'E';
+      else if(d === 180) lbl = 'S';
+      else if(d === 270) lbl = 'W';
+      else lbl = String(d);
+      const isN = (d === 0 || d === 360);
+      const isCard = isN || d===90 || d===180 || d===270;
+      g.fillStyle = isN ? C.MAGENTA : C.WHITE;
+      g.font = (isCard ? "bold " : "") + "11px 'Share Tech Mono',monospace";
+      const lr = roseR + (major ? 14 : 8);
       g.fillText(lbl, cx + Math.cos(angle) * lr, cy + Math.sin(angle) * lr);
     }
   }
@@ -6161,7 +6026,8 @@ function drawBirdsEye(){
   g.closePath(); g.fill();
 
   // ── Heading readout in box above triangle ──
-  const hdgTxt = String(Math.round(hdg) % 360 || 360).padStart(3,'0') + '°';
+  const displayHdg = normHdg(hdg);
+  const hdgTxt = String(Math.round(displayHdg) % 360 || 360).padStart(3,'0') + '°';
   g.font = "bold 14px 'Share Tech Mono',monospace";
   const hdgBw = 58, hdgBh = 22;
   const hdgBx = cx - hdgBw/2;
@@ -6174,22 +6040,24 @@ function drawBirdsEye(){
   g.fillStyle = C.WHITE; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(hdgTxt, cx, hdgBy + hdgBh/2);
 
-  // ── Bottom fade: 20% of circle diameter above the clip fades to transparent ──
-  // Skip fade for desktop both mode (full rose visible)
-  if(!desktopBothFull){
-    const fadeTop = cutY - roseR * 0.4;
-    const fadeH = roseR * 0.4;
-    g.save();
-    g.globalCompositeOperation = 'destination-out';
-    const fadeGrd = g.createLinearGradient(cx, fadeTop, cx, cutY);
-    fadeGrd.addColorStop(0, 'rgba(0,0,0,0)');
-    fadeGrd.addColorStop(1, 'rgba(0,0,0,1)');
-    g.fillStyle = fadeGrd;
-    g.fillRect(0, fadeTop, W, fadeH);
-    g.restore();
-  }
+  // ── Vertical fade at horizontal cutoff (matches ring's radial edge fade) ──
+  const fadeH = roseR * 0.25; // fade zone height
+  g.save();
+  g.globalCompositeOperation = 'destination-out';
+  const fadeGrd = g.createLinearGradient(cx, cutY - fadeH, cx, cutY);
+  fadeGrd.addColorStop(0, 'rgba(0,0,0,0)');
+  fadeGrd.addColorStop(1, 'rgba(0,0,0,1)');
+  g.fillStyle = fadeGrd;
+  g.fillRect(cx - roseR - 30, cutY - fadeH, (roseR + 30) * 2, fadeH);
+  g.restore();
 
   g.restore(); // end outer horizontal clip
+
+  // ── Lateral and range bands removed ──
+
+  // ── Range label (legacy) ──
+  const rl = $id('bevRangeLabel');
+  if(rl) rl.textContent = '';
 }
 
 // ── FULL HUD DRAW ─────────────────────────────────────────
@@ -6199,7 +6067,7 @@ function drawHudVSbar(){
   if(profileOn) return; // profile already has VS tape
   const _vsiMobile = HW < 600;
   const ribW=window._cachedRibW||(window._cachedRibW=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--ribW'))||80);
-  const barW=Math.round(TAPE_W*0.9), gap=6; // VS width 10% skinnier than alt/spd
+  const barW=TAPE_W, gap=6; // VS width matches alt and spd width
   let x, topY, botY, barH;
   if(_vsiMobile){
     // Mobile off/map: equal height split with speed tape
@@ -6236,13 +6104,14 @@ function drawHudVSbar(){
   // ── Airspace VS danger-zone bars — multiple airspaces ──
   // Show bars for: (1) nearest airspace ahead on heading, AND (2) any airspace
   // whose altitude buffer zone we're currently within, even if not ahead.
-  const cosLat3=ac._cosLatR;
+  const cosLat3=Math.cos(ac.lat*D2R);
   const aft=simMode?simAltFt:ac.altM/FT_M;
   const spd=simMode?simSpeedKt:ac.speedKt;
   const fwdHdgR3=ac.hdg*D2R;
-  const nowT3=_frameNow;
+  const nowT3=Date.now();
 
-  // fmtVS removed — using hoisted module-level version
+  // Helper functions (defined once, used for each airspace)
+  function fmtVS(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
   function vsAlert(edgeVal){
     const a = Math.abs(edgeVal);
     const red = a > warnRedVsFpm;
@@ -6285,11 +6154,11 @@ function drawHudVSbar(){
     const dd=(nm*1852)/111320;
     const pLat=ac.lat+Math.cos(fwdHdgR3)*dd;
     const pLon=ac.lon+Math.sin(fwdHdgR3)*dd/cosLat3;
-    for(const as of _nearbyAS){
+    for(const as of AIRSPACE_DATA){
       if(!asClassVisible[as.c]) continue;
       if(as.c==='E') continue;
       if(_vsMaxFwd(as) < 0) continue; // entirely behind aircraft
-      if(pointInPolyAC(as._idx, as)) continue;
+      if(pointInPoly(ac.lat,ac.lon,as.p)) continue;
       if(!pointInPoly(pLat,pLon,as.p)) continue;
       const inActualAlt = (aft >= as.b && aft <= as.t);
       const inBufAlt = !inActualAlt && (aft >= (as.b - clearanceFt) && aft <= (as.t + clearanceFt));
@@ -6357,19 +6226,6 @@ function drawHudVSbar(){
     }
 
     // --- BOTTOM HALF: floor zone (negative VS / descending) ---
-    if(as.b <= 0){
-      // Airspace goes to surface — no VS can clear below it
-      const sfcY = vsY(0) + 4;
-      h.fillStyle=col;h.font="bold 10px 'Share Tech Mono',monospace";h.textAlign='left';
-      h.fillText('SFC',x+2,sfcY+10);
-      // Solid red flashing fill to indicate no escape down
-      const _sfcFlash = Math.floor(_frameNow/250) % 2 === 0;
-      if(_sfcFlash){
-        h.fillStyle=C.RED;h.globalAlpha=0.65;
-        h.fillRect(x,sfcY,barW,botY-sfcY);
-        h.globalAlpha=1;
-      }
-    } else {
     const floorVal=Math.min(vsToFloor,vsToCeil);
     const floorBufVal=Math.min(vsToFloorBuf,vsToCeilBuf);
     // Solid bar (actual airspace bounds — always shown)
@@ -6402,7 +6258,6 @@ function drawHudVSbar(){
         h.fillText('BUF '+fmtVS(floorBufVal),x+2,yBufBot+8);
       }
     }
-    } // end non-surface floor
   } // end vsTargets loop
 
   // Ticks
@@ -6553,19 +6408,15 @@ function updateUI(){
   const altS=aft.toLocaleString()+' FT';
   const hdgS=String(Math.round(ac.hdg)).padStart(3,'0')+'°';
   const spdS=(simMode?Math.round(simSpeedKt):dataMode==='manual'?'---':Math.round(ac.speedKt))+' KT';
-  if(!updateUI._els) updateUI._els={
-    pLat:document.getElementById('pLat'),pLon:document.getElementById('pLon'),
-    pAlt:document.getElementById('pAlt'),pHdg:document.getElementById('pHdg'),
-    pSpd:document.getElementById('pSpd')
-  };
-  const _u=updateUI._els;
-  _u.pLat.textContent=latS; _u.pLon.textContent=lonS;
-  _u.pAlt.textContent=altS; _u.pHdg.textContent=hdgS;
-  _u.pSpd.textContent=spdS;
+  document.getElementById('pLat').textContent=latS;
+  document.getElementById('pLon').textContent=lonS;
+  document.getElementById('pAlt').textContent=altS;
+  document.getElementById('pHdg').textContent=hdgS;
+  document.getElementById('pSpd').textContent=spdS;
 
   // Update nearby airports list (throttled to every 2s)
-  if(!updateUI._apTmr || _frameNow-updateUI._apTmr > 2000){
-    updateUI._apTmr = _frameNow;
+  if(!updateUI._apTmr || Date.now()-updateUI._apTmr > 2000){
+    updateUI._apTmr = Date.now();
     const apEl = document.getElementById('nearbyAirports');
     if(apEl){
       const nearby = AIRPORTS.map(ap => {
@@ -6691,6 +6542,19 @@ function loop(){
   // calcAutoProfileRange, getFAASpeedLimit, etc).
   rebuildNearbyAS();
 
+  // ── Cached filtered airspace (visible, non-E) — reused by all tapes ──
+  if(!window._cachedVisibleAS || _frameNow - (window._cachedVisibleASTime||0) > 250){
+    const _aft=simMode?simAltFt:ac.altM/0.3048;
+    window._cachedVisibleAS=[];
+    for(let i=0;i<AIRSPACE_DATA.length;i++){
+      const as=AIRSPACE_DATA[i];
+      if(!asClassVisible[as.c]) continue;
+      if(as.c==='E') continue;
+      window._cachedVisibleAS.push(as);
+    }
+    window._cachedVisibleASTime=_frameNow;
+  }
+
   // Compute smoothed vertical speed (fpm)
   const _vsNow=performance.now()/1000;
   const _vsDt=_vsNow-_lastAltTime;
@@ -6702,21 +6566,19 @@ function loop(){
 
   updateCamera();
   // In solid mode, hide sectors the aircraft is currently inside
-  // Throttled to 4Hz — visibility doesn't need 60fps updates
-  if(asRenderMode === 'wire' && typeof kmlGroup !== 'undefined' && shouldUpdate('insideSet', 250)){
+  if(asRenderMode === 'wire' && typeof kmlGroup !== 'undefined'){
+    const insideSet = new Set();
     const aft = simMode ? simAltFt : ac.altM/FT_M;
-    // Reuse _nearbyAS + pointInPolyAC cache instead of scanning all AIRSPACE_DATA
-    _insideSet.clear();
-    for(let i=0; i<_nearbyAS.length; i++){
-      const as = _nearbyAS[i];
-      if(aft >= as.b && aft <= as.t && pointInPolyAC(as._idx, as)){
-        _insideSet.add(as._idx);
+    for(let i = 0; i < AIRSPACE_DATA.length; i++){
+      const as = AIRSPACE_DATA[i];
+      if(aft >= as.b && aft <= as.t && pointInPoly(ac.lat, ac.lon, as.p)){
+        insideSet.add(i);
       }
     }
     kmlGroup.children.forEach(ch => {
       if(ch.userData.asIndex !== undefined && ch.isMesh){
         if(!asClassVisible[ch.userData.asClass]){ ch.visible = false; return; }
-        ch.visible = !_insideSet.has(ch.userData.asIndex);
+        ch.visible = !insideSet.has(ch.userData.asIndex);
       }
     });
   }
@@ -6879,7 +6741,9 @@ async function init(){
   initHomeAirport();
 
   // Launch the app with embedded KMZ airspace data
-  rebuildAirspaceVisuals();
+  buildAirspaceGeometry();
+  buildAirportMarkers();
+  setAirspaceRender(asRenderMode);
   loop();
 
   // Init profile canvas context (profile defaults on)
@@ -6904,7 +6768,7 @@ async function init(){
   }
 }
 
-// sleep() removed — was never called
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 // ── WAKE LOCK ─────────────────────────────────────────────
 let wakeLock = null;
@@ -7206,7 +7070,9 @@ async function loadFAAairspace(forceLat, forceLon){
       c.geometry?.dispose(); c.material?.dispose(); kmlGroup.remove(c);
     }
     airportSource.entities.removeAll();
-    rebuildAirspaceVisuals();
+    buildAirspaceGeometry();
+    buildAirportMarkers();
+    setAirspaceRender(asRenderMode);
     toast(`✓ FAA airspace loaded — ${newData.length} sectors`, 3000);
     console.log(`FAA airspace: ${newData.length} sectors loaded`);
     // Cache airspace data to IndexedDB for offline use
@@ -7227,7 +7093,9 @@ async function loadFAAairspace(forceLat, forceLon){
         c.geometry?.dispose(); c.material?.dispose(); kmlGroup.remove(c);
       }
       airportSource.entities.removeAll();
-      rebuildAirspaceVisuals();
+      buildAirspaceGeometry();
+      buildAirportMarkers();
+      setAirspaceRender(asRenderMode);
       toast(`✓ Airspace loaded (offline cache) — ${cached.length} sectors`, 3000);
       console.log(`Offline airspace: ${cached.length} sectors from cache`);
     } else {
