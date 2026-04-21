@@ -4362,6 +4362,11 @@ function drawHdgTape(){
     let diffFromCenter = barMidBrg - a.centerBrg;
     if(diffFromCenter > 180) diffFromCenter -= 360; if(diffFromCenter < -180) diffFromCenter += 360;
     const escDir = (diffFromCenter >= 0) ? 'right' : 'left';
+    // Determine if this bar is in the forward arc (within ±30° of heading)
+    const barCenterBrg = ((a.lo + a.hi) / 2) % 360;
+    let _fwdOff = barCenterBrg - hdg; if(_fwdOff>180) _fwdOff-=360; if(_fwdOff<-180) _fwdOff+=360;
+    const _isFwd = Math.abs(_fwdOff) <= 30;
+
     for(const shift of [-360, 0, 360]){
       const lo = a.lo - hdg + shift;
       const hi = a.hi - hdg + shift;
@@ -4372,7 +4377,7 @@ function drawHdgTape(){
       const bx = x1 - 0.5;
       const _isAlert = isR || isY;
       if(a.tier === 1){
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, _alert:_isAlert});
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, _alert:_isAlert, _fwd:_isFwd});
       } else {
         if(a.owner.atSameAlt){
           const cRel = a.centerBrg - hdg + shift;
@@ -4385,13 +4390,13 @@ function drawHdgTape(){
             drawX = bx;
             drawW = Math.max(bx + bw, centerX) - bx;
           }
-          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, _alert:_isAlert});
+          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, _alert:_isAlert, _fwd:_isFwd});
         }
       }
       if(_isAlert){
         const show = isR ? redFlash : yelFlash;
         if(show){
-          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60});
+          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60, _fwd:_isFwd});
         }
       }
     }
@@ -4400,12 +4405,12 @@ function drawHdgTape(){
   // Set screen flash from compass alerts
   _screenFlashActive = hdgOverlays.length > 0;
   if(_screenFlashActive){
-    // Use the most severe alert color (red > yellow)
     const hasRed = hdgOverlays.some(b => b.col === C.RED);
     _screenFlashCol = hasRed ? C.RED : C.YEL;
   }
 
-  // ── Draw: non-alert bars first, then alert bars + overlays on top ──
+  // ── Draw order: non-alert → side alerts → forward alerts (highest z) ──
+  // Layer 1: non-alert bars
   for(const bar of hdgHatch){ if(bar._alert) continue;
     h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
@@ -4413,16 +4418,26 @@ function drawHdgTape(){
   for(const bar of hdgSolid){ if(bar._alert) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
-  // Alert bars on top
-  for(const bar of hdgHatch){ if(!bar._alert) continue;
+  // Layer 2: side alert bars (not forward)
+  for(const bar of hdgHatch){ if(!bar._alert || bar._fwd) continue;
     h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
   }
-  for(const bar of hdgSolid){ if(!bar._alert) continue;
+  for(const bar of hdgSolid){ if(!bar._alert || bar._fwd) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
-  // Alert overlays (highest z)
-  for(const bar of hdgOverlays){
+  for(const bar of hdgOverlays){ if(bar._fwd) continue;
+    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
+  }
+  // Layer 3: forward alert bars — highest z, drawn last
+  for(const bar of hdgHatch){ if(!bar._alert || !bar._fwd) continue;
+    h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
+    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
+  }
+  for(const bar of hdgSolid){ if(!bar._alert || !bar._fwd) continue;
+    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
+  }
+  for(const bar of hdgOverlays){ if(!bar._fwd) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
 
