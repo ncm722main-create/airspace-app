@@ -697,6 +697,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
     <div class="prow"><span class="k">AIRSPACE</span><span class="v" id="dataAirspaceAge">—</span></div>
     <div class="prow"><span class="k">AIRPORTS</span><span class="v" id="dataAirportsAge">—</span></div>
     <button class="sbtn" style="width:100%;margin-top:6px;" onclick="refreshAllData()" id="dataRefreshBtn">⟳ REFRESH DATA</button>
+    <button class="sbtn" style="width:100%;margin-top:4px;background:rgba(255,60,60,0.25);border-color:rgba(255,60,60,0.5);" onclick="clearAllData()" id="dataClearBtn">✕ CLEAR DATA</button>
   </div>
 
   <div class="sps">
@@ -2376,6 +2377,57 @@ async function refreshAllData(){
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = '⟳ REFRESH DATA'; }
     updateDataStatus();
+  }
+}
+async function clearAllData(){
+  const btn = document.getElementById('dataClearBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '✕ CLEARING…'; }
+  try{
+    // Clear in-memory data
+    AIRSPACE_DATA.length = 0;
+    _nearbyAS.length = 0;
+    AIRPORTS.length = 0;
+    _insideSet.clear();
+    // Clear Three.js airspace meshes
+    if(typeof kmlGroup !== 'undefined'){
+      while(kmlGroup.children.length){
+        const ch = kmlGroup.children[0];
+        if(ch.geometry) ch.geometry.dispose();
+        if(ch.material){
+          if(ch.material.map) ch.material.map.dispose();
+          ch.material.dispose();
+        }
+        kmlGroup.remove(ch);
+      }
+    }
+    // Clear texture cache
+    for(const k in asTexCache) delete asTexCache[k];
+    // Clear Cesium airport markers
+    if(typeof airportSource !== 'undefined') airportSource.entities.removeAll();
+    // Clear IndexedDB cache
+    if(avdDB){
+      try{
+        const tx = avdDB.transaction(AVD_STORE,'readwrite');
+        tx.objectStore(AVD_STORE).clear();
+      }catch(e){ console.warn('IDB clear:',e); }
+    }
+    // Clear localStorage data keys
+    localStorage.removeItem('lastAirspaceData');
+    localStorage.removeItem('lastAirportData');
+    localStorage.removeItem('lastFetchLat');
+    localStorage.removeItem('lastFetchLon');
+    localStorage.removeItem('lastFetchTime');
+    // Reset precomputed bounds
+    if(typeof precomputeAirspaceBounds === 'function') precomputeAirspaceBounds();
+    // Reset cached pointInPoly
+    _pipCache = {}; _pipCacheFrame = -1;
+    updateDataStatus();
+    toast('✓ All data cleared', 2000);
+  }catch(e){
+    console.error('clearAllData:', e);
+    toast('⚠ Error clearing data', 2000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '✕ CLEAR DATA'; }
   }
 }
 // Keep the age labels updating while the panel is open
