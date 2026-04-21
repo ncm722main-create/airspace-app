@@ -2432,9 +2432,13 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      const rate = offset * 1.5;
-      const scale = simSpeedKt >= 500 ? (1 + (simSpeedKt - 500) / 400) : 1;
-      simSpeedKt = Math.max(0, Math.min(6615, simSpeedKt + rate * scale));
+      // Base rate: linear up to 250 kt, exponential above
+      let rate = offset * 1.5;
+      if(simSpeedKt > 250){
+        const excess = simSpeedKt - 250;
+        rate *= 1 + (excess * excess) / 40000; // exponential growth above 250
+      }
+      simSpeedKt = Math.max(0, Math.min(6615, simSpeedKt + rate));
       ac.speedKt = simSpeedKt;
     }
     raf = requestAnimationFrame(tick);
@@ -2471,9 +2475,13 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      const rate = offset * 26;
-      const scale = simAltFt >= 10000 ? (1 + (simAltFt - 10000) / 20000) : 1;
-      simAltFt = Math.max(0, Math.min(100000, simAltFt + rate * scale));
+      // Full swipe = 2000 ft/sec → ~33.3 ft/frame at 60fps
+      let rate = offset * 33.3;
+      if(simAltFt > 10000){
+        const excess = simAltFt - 10000;
+        rate *= 1 + (excess * excess) / 500000000; // exponential growth above 10,000
+      }
+      simAltFt = Math.max(0, Math.min(100000, simAltFt + rate));
       ac.altM = simAltFt * FT_M;
     }
     raf = requestAnimationFrame(tick);
@@ -2512,7 +2520,8 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
       applyGpsCalibration();
       cfgPersist();
     } else {
-      const rate = offset * 1.5;
+      // 45 deg/sec at full swipe → 0.75 deg/frame at 60fps
+      const rate = offset * 0.75;
       ac.hdg = normHdg(ac.hdg + rate);
     }
     raf = requestAnimationFrame(tick);
