@@ -1623,28 +1623,35 @@ function avdPut(key,value){
 
 // Generate airspace grid texture (procedural canvas → Three.js CanvasTexture)
 function makeAirspaceTexture(hexColor){
-  const sz=128, c=document.createElement('canvas');
+  const sz=256, c=document.createElement('canvas');
   c.width=sz; c.height=sz;
   const g=c.getContext('2d');
   const r = (hexColor>>16)&0xFF, gr2 = (hexColor>>8)&0xFF, bl = hexColor&0xFF;
+  // Dark fill
   g.globalAlpha=1.0;
-  g.fillStyle = `rgb(${Math.round(r*0.5)},${Math.round(gr2*0.5)},${Math.round(bl*0.5)})`;
+  g.fillStyle = `rgb(${Math.round(r*0.45)},${Math.round(gr2*0.45)},${Math.round(bl*0.45)})`;
   g.fillRect(0,0,sz,sz);
-  g.strokeStyle = `rgb(${Math.min(255,r+120)},${Math.min(255,gr2+120)},${Math.min(255,bl+120)})`;
-  g.lineWidth=1.5;
-  const step = 32;
+  // Primary grid lines — bright, thick
+  g.strokeStyle = `rgb(${Math.min(255,r+130)},${Math.min(255,gr2+130)},${Math.min(255,bl+130)})`;
+  g.lineWidth=2.5;
+  const step = 64;
   for(let i=0;i<=sz;i+=step){
     g.beginPath(); g.moveTo(0,i); g.lineTo(sz,i); g.stroke();
     g.beginPath(); g.moveTo(i,0); g.lineTo(i,sz); g.stroke();
   }
-  g.strokeStyle = `rgba(${Math.min(255,r+60)},${Math.min(255,gr2+60)},${Math.min(255,bl+60)},0.5)`;
-  g.lineWidth=0.5;
+  // Diagonal cross-hatch
+  g.strokeStyle = `rgba(${Math.min(255,r+80)},${Math.min(255,gr2+80)},${Math.min(255,bl+80)},0.6)`;
+  g.lineWidth=1.0;
   for(let i=-sz;i<=sz*2;i+=step){
     g.beginPath(); g.moveTo(i,0); g.lineTo(i+sz,sz); g.stroke();
     g.beginPath(); g.moveTo(i,sz); g.lineTo(i+sz,0); g.stroke();
   }
   const tex=new THREE.CanvasTexture(c);
   tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
+  tex.generateMipmaps=false;
+  tex.minFilter=THREE.LinearFilter;
+  tex.magFilter=THREE.LinearFilter;
+  tex.needsUpdate=true;
   return tex;
 }
 const asTexCache={};
