@@ -7136,17 +7136,11 @@ async function loadFAAairports(cLat, cLon){
   }
 }
 
-// ── FREQUENCY DATA — FAA official ArcGIS + OurAirports fallback ──
-// Primary: FAA AIS Frequency FeatureServer (official 56-day cycle data)
-// Fallback: OurAirports community CSV (CC0/public domain)
+// ── FREQUENCY DATA — OurAirports base + FAA ATIS overlay ─────
+// 1. OurAirports CSV: comprehensive TWR/APP/GND/DEP/ATIS/CTAF (community)
+// 2. FAA ArcGIS Services+Frequencies: authoritative ATIS (overwrites OurAirports ATIS)
+// All frequencies formatted to 3 decimal places via fmtFreq()
 let _freqCSVLoaded = false;
-
-// Try multiple possible FAA Frequency FeatureServer service names
-const FAA_FREQ_URLS = [
-  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Frequency/FeatureServer/0/query',
-  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Frequencies/FeatureServer/0/query',
-  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Communication_Frequencies/FeatureServer/0/query'
-];
 
 function _mapFreqType(type){
   if(!type) return null;
@@ -7163,114 +7157,24 @@ function _mapFreqType(type){
   return null;
 }
 
-function _storeFreq(ident, typeKey, freq){
+function _storeFreq(ident, typeKey, freq, overwrite){
   if(!ident || !typeKey || !freq) return;
   const f = String(freq).trim();
   if(!f || f === '0' || f === '0.0') return;
   if(!FREQ_CACHE[ident]) FREQ_CACHE[ident] = {};
-  // Always overwrite — newer sources take priority
-  FREQ_CACHE[ident][typeKey] = f;
+  if(overwrite || !FREQ_CACHE[ident][typeKey]){
+    FREQ_CACHE[ident][typeKey] = f;
+  }
 }
 
 async function loadFrequencies(){
   if(_freqCSVLoaded && Object.keys(FREQ_CACHE).length > 0) return;
 
-  // ── 1. Try FAA ArcGIS Frequency FeatureServer ──
-  let faaOk = false;
-  for(const baseUrl of FAA_FREQ_URLS){
-    try {
-      // Spatial query around aircraft position (same bbox as airports)
-      const rangeNm = window._dataRangeNm || 25;
-      const nmDeg = rangeNm / 60;
-      const cosLat = Math.cos(ac.lat * D2R);
-      const lonSpan = nmDeg / cosLat;
-      const bbox = {
-        xmin: (ac.lon - lonSpan).toFixed(3), ymin: (ac.lat - nmDeg).toFixed(3),
-        xmax: (ac.lon + lonSpan).toFixed(3), ymax: (ac.lat + nmDeg).toFixed(3)
-      };
-      const geom = encodeURIComponent(JSON.stringify({...bbox, spatialReference:{wkid:4326}}));
+  // ── Step 1: OurAirports CSV (comprehensive base) ──
+  await _loadOurAirportsFreq();
 
-      // Discovery: get 1 record with all fields to learn schema
-      const discUrl = baseUrl + '?where=1%3D1&outFields=*&resultRecordCount=1&f=json';
-      const discResp = await fetch(discUrl);
-      if(!discResp.ok) continue;
-      const discData = await discResp.json();
-      if(discData.error || !discData.features || discData.features.length === 0) continue;
-
-      // Discover field names from first record
-      const sample = discData.features[0].attributes;
-      const keys = Object.keys(sample);
-      const identField = keys.find(k => /^(IDENT|ARPT_ID|FACILITY_IDENT|AIRPORT_IDENT|ICAO)/i.test(k))
-                       || keys.find(k => /IDENT/i.test(k));
-      const typeField  = keys.find(k => /^(TYPE_CODE|COMM_TYPE|TYPE|FREQUENCY_USE)/i.test(k))
-                       || keys.find(k => /TYPE/i.test(k));
-      const freqField  = keys.find(k => /^(FREQ|FREQUENCY|FREQUENCY_MHZ|COMM_OUTLET_FREQ)/i.test(k))
-                       || keys.find(k => /FREQ/i.test(k));
-      if(!identField || !freqField){
-        console.warn('FAA Freq: could not find ident/freq fields in:', keys);
-        continue;
-      }
-      console.log('FAA Freq fields:', {identField, typeField, freqField, allKeys: keys});
-
-      // Check if service supports spatial queries
-      const hasSpatial = discData.features[0].geometry != null;
-      let queryUrl;
-      if(hasSpatial){
-        queryUrl = baseUrl
-          + '?where=1%3D1'
-          + '&outFields=' + encodeURIComponent([identField, typeField, freqField].filter(Boolean).join(','))
-          + '&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&returnGeometry=false&f=json'
-          + '&geometry=' + geom
-          + '&resultRecordCount=5000';
-      } else {
-        // Non-spatial table — query by airport idents
-        const idents = AIRPORTS.map(a => "'"+a.id+"'").join(',');
-        if(!idents) continue;
-        queryUrl = baseUrl
-          + '?where=' + encodeURIComponent(identField + ' IN (' + idents + ')')
-          + '&outFields=' + encodeURIComponent([identField, typeField, freqField].filter(Boolean).join(','))
-          + '&returnGeometry=false&f=json&resultRecordCount=5000';
-      }
-
-      const resp = await fetch(queryUrl);
-      if(!resp.ok) continue;
-      const data = await resp.json();
-      if(data.error || !data.features) continue;
-
-      let count = 0;
-      for(const feat of data.features){
-        const a = feat.attributes;
-        const ident = a[identField];
-        const type  = typeField ? a[typeField] : null;
-        const freq  = a[freqField];
-        if(!ident || !freq) continue;
-        // Normalize ident: add K prefix if 3 chars (FAA LID → ICAO)
-        let nId = String(ident).trim();
-        if(nId.length === 3 && /^[A-Z]/.test(nId)) nId = 'K' + nId;
-        const typeKey = _mapFreqType(type) || 'TWR';
-        _storeFreq(nId, typeKey, freq);
-        count++;
-      }
-      if(count > 0){
-        faaOk = true;
-        _freqCSVLoaded = true;
-        console.log(`FAA frequencies: ${count} entries for ${Object.keys(FREQ_CACHE).length} airports`);
-        toast(`✓ FAA frequencies loaded — ${Object.keys(FREQ_CACHE).length} airports`, 2000);
-        avdPut('frequencies', {...FREQ_CACHE});
-        avdPut('freq_source', 'faa');
-        break;
-      }
-    } catch(e) {
-      console.warn('FAA Freq service error:', e.message);
-      continue;
-    }
-  }
-
-  // ── 2. Fallback: OurAirports community CSV ──
-  if(!faaOk){
-    console.log('FAA Freq service unavailable, falling back to OurAirports CSV');
-    await _loadOurAirportsFreq();
-  }
+  // ── Step 2: FAA ATIS overlay (authoritative, overwrites OurAirports ATIS) ──
+  _loadFAAatisOverlay().catch(e => console.warn('FAA ATIS overlay skipped:', e.message));
 }
 
 async function _loadOurAirportsFreq(){
@@ -7300,14 +7204,12 @@ async function _loadOurAirportsFreq(){
       const type = cols[iType].replace(/"/g,'').trim();
       const freq = cols[iFreq].replace(/"/g,'').trim();
       const typeKey = _mapFreqType(type);
-      if(typeKey) _storeFreq(ourId, typeKey, freq);
+      if(typeKey) _storeFreq(ourId, typeKey, freq, false);
     }
     _freqCSVLoaded = true;
     const freqCount = Object.keys(FREQ_CACHE).length;
     console.log(`OurAirports frequencies: ${freqCount} airports`);
-    toast(`✓ Frequencies loaded — ${freqCount} airports (community)`, 2000);
     avdPut('frequencies', {...FREQ_CACHE});
-    avdPut('freq_source', 'ourairports');
   } catch(e) {
     console.warn('OurAirports fetch failed:', e.message);
     const cached = await avdGet('frequencies').catch(()=>null);
@@ -7318,6 +7220,67 @@ async function _loadOurAirportsFreq(){
       console.log(`Offline frequencies: ${Object.keys(FREQ_CACHE).length} airports from cache`);
     }
   }
+}
+
+// Overlay authoritative FAA ATIS frequencies on top of OurAirports data
+async function _loadFAAatisOverlay(){
+  if(AIRPORTS.length === 0) return;
+  const svcBase = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Services/FeatureServer/0/query';
+  const freqBase = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Frequencies/FeatureServer/0/query';
+
+  // Query Services table for our airport FAA idents
+  const faaIds = AIRPORTS.map(a => a.faaId || a.id.replace(/^K/,'')).filter(Boolean);
+  const chunks = [];
+  for(let i = 0; i < faaIds.length; i += 50) chunks.push(faaIds.slice(i, i+50));
+
+  let totalOverlaid = 0;
+  for(const chunk of chunks){
+    try {
+      const where = "IDENT IN (" + chunk.map(id => "'"+id+"'").join(',') + ")";
+      const svcUrl = svcBase + '?where=' + encodeURIComponent(where) + '&outFields=GLOBAL_ID,IDENT,TYPE_CODE&returnGeometry=false&f=json&resultRecordCount=500';
+      const svcResp = await fetch(svcUrl);
+      if(!svcResp.ok) continue;
+      const svcData = await svcResp.json();
+      if(!svcData.features || svcData.features.length === 0) continue;
+
+      // Map SERVICE_ID → airport ident
+      const svcMap = {};
+      const gids = [];
+      for(const f of svcData.features){
+        const a = f.attributes;
+        svcMap[a.GLOBAL_ID] = a.IDENT;
+        gids.push("'" + a.GLOBAL_ID + "'");
+      }
+
+      // Query Frequencies for these services
+      const freqWhere = "SERVICE_ID IN (" + gids.join(',') + ")";
+      const freqUrl = freqBase + '?where=' + encodeURIComponent(freqWhere) + '&outFields=SERVICE_ID,FREQ_TRANS,TYPE_CODE&returnGeometry=false&f=json&resultRecordCount=2000';
+      const freqResp = await fetch(freqUrl);
+      if(!freqResp.ok) continue;
+      const freqData = await freqResp.json();
+      if(!freqData.features) continue;
+
+      for(const f of freqData.features){
+        const a = f.attributes;
+        const faaId = svcMap[a.SERVICE_ID];
+        if(!faaId || !a.FREQ_TRANS) continue;
+        // Convert FAA LID to ICAO
+        let icao = 'K' + faaId;
+        // Check if this ICAO exists in our AIRPORTS
+        const ap = AIRPORTS.find(x => x.id === icao || x.faaId === faaId);
+        if(!ap) continue;
+        const typeKey = _mapFreqType(a.TYPE_CODE) || 'ATIS';
+        // Overwrite OurAirports data with authoritative FAA data
+        _storeFreq(ap.id, typeKey, String(a.FREQ_TRANS), true);
+        totalOverlaid++;
+      }
+    } catch(e) { continue; }
+  }
+  if(totalOverlaid > 0){
+    console.log(`FAA ATIS overlay: ${totalOverlaid} frequencies updated`);
+    avdPut('frequencies', {...FREQ_CACHE});
+  }
+  toast(`✓ Frequencies loaded — ${Object.keys(FREQ_CACHE).length} airports`, 2000);
 }
 
 // ═══════════════════════════════════════════════════════════
