@@ -1315,12 +1315,12 @@ const FREQ_CACHE = {};  // keyed by airport IDENT, e.g. { KSFO: { TWR: '118.3', 
 
 const AS_HEX = {
   B:0x0000ff, C:0xff00ff, D:0x44aaff, E:0x7755bb,
-  RESTRICTED:0xff0000, PROHIBITED:0xff0000,
+  RESTRICTED:0xff0000, PROHIBITED:0xff0000, ALERT:0xffaa00,
   MOA:0xff00ff, WARNING:0xffaa00, DEFAULT:0x506070,
 };
 const AS_COLOR = {
   B:'#0000FF', C:'#FF00FF', D:'#44AAFF', E:'#7755bb',
-  RESTRICTED:'#FF0000', PROHIBITED:'#FF0000',
+  RESTRICTED:'#FF0000', PROHIBITED:'#FF0000', ALERT:'#FFAA00',
   MOA:'#FF00FF', WARNING:'#FFAA00', DEFAULT:'#506070',
 };
 const asCol = c => AS_COLOR[c] || AS_COLOR.DEFAULT;
@@ -1370,7 +1370,7 @@ const keysDown = {};
 let locked=false, settingsOpen=false;
 
 // Airspace class visibility toggles
-const asClassVisible = { B:true, C:true, D:true, E:true, RESTRICTED:true, PROHIBITED:true, MOA:true, WARNING:true, DEFAULT:true };
+const asClassVisible = { B:true, C:true, D:true, E:true, RESTRICTED:true, PROHIBITED:true, ALERT:true, MOA:true, WARNING:true, DEFAULT:true };
 let asRenderMode = 'wire'; // 'wire' = Solid button (opaque), 'solid' = Wire button (lines only)
 let profileOn     = false;    // cross-section profile view
 let profileMode   = 'off';  // 'off', 'half', 'full'
@@ -4643,7 +4643,7 @@ function drawAirportInfoPanel(){
         for(const k of fOrder){
           if(!freqs[k]) continue;
           h.fillStyle='#888'; h.fillText(fLabels[k], tx, ty);
-          h.fillStyle='#4AE0FF'; h.fillText(freqs[k], tx+freqOff, ty);
+          h.fillStyle='#4AE0FF'; h.fillText(fmtFreq(freqs[k]), tx+freqOff, ty);
           ty+=lineH;
         }
       } else {
@@ -5358,11 +5358,13 @@ const AS_FREQ_BASE = {
   PROHIBITED: 'Restricted',
   MOA: 'See Chart',
   WARNING: 'Advisory',
+  ALERT: 'Alert',
   DEFAULT: ''
 };
 
-// Validate VHF aviation frequency (118-137 MHz)
+// Validate VHF aviation frequency (118-137 MHz) and format to 3 decimal places
 function validVHF(f){ const n=parseFloat(f); return !isNaN(n)&&n>=118&&n<=137; }
+function fmtFreq(f){ const n=parseFloat(f); return (!isNaN(n)&&n>=100) ? n.toFixed(3) : f; }
 
 function getFreqForAirspace(as){
   // For non-C/D/B classes, use generic labels
@@ -5373,11 +5375,12 @@ function getFreqForAirspace(as){
     if(pointInPoly(ap.lat, ap.lon, as.p)){
       const fc = FREQ_CACHE[ap.id];
       if(fc){
-        if(as.c === 'D' && fc.TWR && validVHF(fc.TWR)) return ap.id.replace(/^K/,'') + ' Twr ' + fc.TWR;
-        if(as.c === 'C' && fc.APP && validVHF(fc.APP)) return ap.id.replace(/^K/,'') + ' App ' + fc.APP;
-        if(as.c === 'C' && fc.TWR && validVHF(fc.TWR)) return ap.id.replace(/^K/,'') + ' Twr ' + fc.TWR;
-        if(as.c === 'B' && fc.APP && validVHF(fc.APP)) return ap.id.replace(/^K/,'') + ' App ' + fc.APP;
-        if(fc.TWR && validVHF(fc.TWR)) return ap.id.replace(/^K/,'') + ' Twr ' + fc.TWR;
+        const lbl = ap.id.replace(/^K/,'');
+        if(as.c === 'D' && fc.TWR && validVHF(fc.TWR)) return lbl + ' Twr ' + fmtFreq(fc.TWR);
+        if(as.c === 'C' && fc.APP && validVHF(fc.APP)) return lbl + ' App ' + fmtFreq(fc.APP);
+        if(as.c === 'C' && fc.TWR && validVHF(fc.TWR)) return lbl + ' Twr ' + fmtFreq(fc.TWR);
+        if(as.c === 'B' && fc.APP && validVHF(fc.APP)) return lbl + ' App ' + fmtFreq(fc.APP);
+        if(fc.TWR && validVHF(fc.TWR)) return lbl + ' Twr ' + fmtFreq(fc.TWR);
       }
       return as.c === 'D' ? 'Tower' : 'Approach';
     }
@@ -5393,11 +5396,12 @@ function getFreqForAirspace(as){
     if(d < bestD && d < 15){ bestD=d; best=ap; }
   }
   if(best){
+    const lbl = best.id.replace(/^K/,'');
     const fc = FREQ_CACHE[best.id];
-    if(as.c === 'D' && fc.TWR && validVHF(fc.TWR)) return best.id.replace(/^K/,'') + ' Twr ' + fc.TWR;
-    if(as.c === 'C' && fc.APP && validVHF(fc.APP)) return best.id.replace(/^K/,'') + ' App ' + fc.APP;
-    if(as.c === 'B' && fc.APP && validVHF(fc.APP)) return best.id.replace(/^K/,'') + ' App ' + fc.APP;
-    if(fc.TWR && validVHF(fc.TWR)) return best.id.replace(/^K/,'') + ' Twr ' + fc.TWR;
+    if(as.c === 'D' && fc.TWR && validVHF(fc.TWR)) return lbl + ' Twr ' + fmtFreq(fc.TWR);
+    if(as.c === 'C' && fc.APP && validVHF(fc.APP)) return lbl + ' App ' + fmtFreq(fc.APP);
+    if(as.c === 'B' && fc.APP && validVHF(fc.APP)) return lbl + ' App ' + fmtFreq(fc.APP);
+    if(fc.TWR && validVHF(fc.TWR)) return lbl + ' Twr ' + fmtFreq(fc.TWR);
   }
   return as.c === 'B' ? 'Approach' : as.c === 'C' ? 'Approach' : 'Tower';
 }
@@ -6923,7 +6927,7 @@ function _freqHTML(freqs){
   let html='';
   for(const k of order){
     if(freqs[k]){
-      html+=`<div><span style="color:var(--dim);display:inline-block;width:36px;">${labels[k]}</span> <span style="color:#fff;">${freqs[k]}</span></div>`;
+      html+=`<div><span style="color:var(--dim);display:inline-block;width:36px;">${labels[k]}</span> <span style="color:#fff;">${fmtFreq(freqs[k])}</span></div>`;
     }
   }
   return html || '<span style="color:var(--dim)">No freq data</span>';
@@ -7132,80 +7136,180 @@ async function loadFAAairports(cLat, cLon){
   }
 }
 
-// ── FREQUENCY DATA — OurAirports community database ──────────
-// Source: https://ourairports.com (CC0/public domain, updated weekly)
-// Uses airport_ident (ICAO code) for direct matching
+// ── FREQUENCY DATA — FAA official ArcGIS + OurAirports fallback ──
+// Primary: FAA AIS Frequency FeatureServer (official 56-day cycle data)
+// Fallback: OurAirports community CSV (CC0/public domain)
 let _freqCSVLoaded = false;
+
+// Try multiple possible FAA Frequency FeatureServer service names
+const FAA_FREQ_URLS = [
+  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Frequency/FeatureServer/0/query',
+  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Frequencies/FeatureServer/0/query',
+  'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Communication_Frequencies/FeatureServer/0/query'
+];
+
+function _mapFreqType(type){
+  if(!type) return null;
+  const t = type.toUpperCase();
+  if(t.includes('TWR') || t==='LCL' || t==='LCL/P' || t==='LC') return 'TWR';
+  if(t.includes('APP') || t.includes('APPROACH') || t.includes('TRACON') || t.includes('RAPCON')) return 'APP';
+  if(t.includes('DEP') || t.includes('DEPARTURE')) return 'DEP';
+  if(t.includes('ATIS') || t.includes('AWOS') || t.includes('ASOS')) return 'ATIS';
+  if(t.includes('GND') || t.includes('GROUND')) return 'GND';
+  if(t.includes('CLR') || t.includes('CLNC') || t.includes('DEL') || t==='CD') return 'CD';
+  if(t.includes('CTAF')) return 'CTAF';
+  if(t.includes('UNIC')) return 'UNICOM';
+  if(t.includes('CNTR') || t.includes('CTR') || t.includes('CENTER')) return 'CTR';
+  return null;
+}
+
+function _storeFreq(ident, typeKey, freq){
+  if(!ident || !typeKey || !freq) return;
+  const f = String(freq).trim();
+  if(!f || f === '0' || f === '0.0') return;
+  if(!FREQ_CACHE[ident]) FREQ_CACHE[ident] = {};
+  // Always overwrite — newer sources take priority
+  FREQ_CACHE[ident][typeKey] = f;
+}
+
 async function loadFrequencies(){
-  // Only fetch the CSV once — it covers the entire world
-  if(_freqCSVLoaded && Object.keys(FREQ_CACHE).length > 0){
-    // Just re-map for any new airports
-    return;
+  if(_freqCSVLoaded && Object.keys(FREQ_CACHE).length > 0) return;
+
+  // ── 1. Try FAA ArcGIS Frequency FeatureServer ──
+  let faaOk = false;
+  for(const baseUrl of FAA_FREQ_URLS){
+    try {
+      // Spatial query around aircraft position (same bbox as airports)
+      const rangeNm = window._dataRangeNm || 25;
+      const nmDeg = rangeNm / 60;
+      const cosLat = Math.cos(ac.lat * D2R);
+      const lonSpan = nmDeg / cosLat;
+      const bbox = {
+        xmin: (ac.lon - lonSpan).toFixed(3), ymin: (ac.lat - nmDeg).toFixed(3),
+        xmax: (ac.lon + lonSpan).toFixed(3), ymax: (ac.lat + nmDeg).toFixed(3)
+      };
+      const geom = encodeURIComponent(JSON.stringify({...bbox, spatialReference:{wkid:4326}}));
+
+      // Discovery: get 1 record with all fields to learn schema
+      const discUrl = baseUrl + '?where=1%3D1&outFields=*&resultRecordCount=1&f=json';
+      const discResp = await fetch(discUrl);
+      if(!discResp.ok) continue;
+      const discData = await discResp.json();
+      if(discData.error || !discData.features || discData.features.length === 0) continue;
+
+      // Discover field names from first record
+      const sample = discData.features[0].attributes;
+      const keys = Object.keys(sample);
+      const identField = keys.find(k => /^(IDENT|ARPT_ID|FACILITY_IDENT|AIRPORT_IDENT|ICAO)/i.test(k))
+                       || keys.find(k => /IDENT/i.test(k));
+      const typeField  = keys.find(k => /^(TYPE_CODE|COMM_TYPE|TYPE|FREQUENCY_USE)/i.test(k))
+                       || keys.find(k => /TYPE/i.test(k));
+      const freqField  = keys.find(k => /^(FREQ|FREQUENCY|FREQUENCY_MHZ|COMM_OUTLET_FREQ)/i.test(k))
+                       || keys.find(k => /FREQ/i.test(k));
+      if(!identField || !freqField){
+        console.warn('FAA Freq: could not find ident/freq fields in:', keys);
+        continue;
+      }
+      console.log('FAA Freq fields:', {identField, typeField, freqField, allKeys: keys});
+
+      // Check if service supports spatial queries
+      const hasSpatial = discData.features[0].geometry != null;
+      let queryUrl;
+      if(hasSpatial){
+        queryUrl = baseUrl
+          + '?where=1%3D1'
+          + '&outFields=' + encodeURIComponent([identField, typeField, freqField].filter(Boolean).join(','))
+          + '&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&returnGeometry=false&f=json'
+          + '&geometry=' + geom
+          + '&resultRecordCount=5000';
+      } else {
+        // Non-spatial table — query by airport idents
+        const idents = AIRPORTS.map(a => "'"+a.id+"'").join(',');
+        if(!idents) continue;
+        queryUrl = baseUrl
+          + '?where=' + encodeURIComponent(identField + ' IN (' + idents + ')')
+          + '&outFields=' + encodeURIComponent([identField, typeField, freqField].filter(Boolean).join(','))
+          + '&returnGeometry=false&f=json&resultRecordCount=5000';
+      }
+
+      const resp = await fetch(queryUrl);
+      if(!resp.ok) continue;
+      const data = await resp.json();
+      if(data.error || !data.features) continue;
+
+      let count = 0;
+      for(const feat of data.features){
+        const a = feat.attributes;
+        const ident = a[identField];
+        const type  = typeField ? a[typeField] : null;
+        const freq  = a[freqField];
+        if(!ident || !freq) continue;
+        // Normalize ident: add K prefix if 3 chars (FAA LID → ICAO)
+        let nId = String(ident).trim();
+        if(nId.length === 3 && /^[A-Z]/.test(nId)) nId = 'K' + nId;
+        const typeKey = _mapFreqType(type) || 'TWR';
+        _storeFreq(nId, typeKey, freq);
+        count++;
+      }
+      if(count > 0){
+        faaOk = true;
+        _freqCSVLoaded = true;
+        console.log(`FAA frequencies: ${count} entries for ${Object.keys(FREQ_CACHE).length} airports`);
+        toast(`✓ FAA frequencies loaded — ${Object.keys(FREQ_CACHE).length} airports`, 2000);
+        avdPut('frequencies', {...FREQ_CACHE});
+        avdPut('freq_source', 'faa');
+        break;
+      }
+    } catch(e) {
+      console.warn('FAA Freq service error:', e.message);
+      continue;
+    }
   }
+
+  // ── 2. Fallback: OurAirports community CSV ──
+  if(!faaOk){
+    console.log('FAA Freq service unavailable, falling back to OurAirports CSV');
+    await _loadOurAirportsFreq();
+  }
+}
+
+async function _loadOurAirportsFreq(){
   try {
     const resp = await fetch('https://davidmegginson.github.io/ourairports-data/airport-frequencies.csv');
     if(!resp.ok) throw new Error('Freq CSV fetch failed');
     const text = await resp.text();
     const lines = text.split('\n');
-    // Header: "id","airport_ref","airport_ident","type","description","frequency_mhz"
     const hdr = lines[0].split(',').map(h => h.replace(/"/g,'').trim());
     const iIdent = hdr.indexOf('airport_ident');
     const iType  = hdr.indexOf('type');
     const iFreq  = hdr.indexOf('frequency_mhz');
-    if(iIdent < 0 || iType < 0 || iFreq < 0) throw new Error('CSV header mismatch: '+hdr.join(','));
+    if(iIdent < 0 || iType < 0 || iFreq < 0) throw new Error('CSV header mismatch');
 
-    // Build lookup maps: OurAirports ident → our airport id
-    // OurAirports uses ICAO (KSFO) for towered, FAA LID (C83) for non-towered
-    const identToId = {};  // maps CSV ident → our stored airport id
+    const identToId = {};
     for(const ap of AIRPORTS){
-      identToId[ap.id] = ap.id;           // ICAO: "KSFO" → "KSFO"
-      if(ap.faaId) identToId[ap.faaId] = ap.id; // FAA LID: "SFO" → "KSFO"
+      identToId[ap.id] = ap.id;
+      if(ap.faaId) identToId[ap.faaId] = ap.id;
     }
 
-    // Parse only rows matching our loaded airports
     for(let i = 1; i < lines.length; i++){
       const cols = lines[i].split(',');
       if(cols.length < Math.max(iIdent, iType, iFreq) + 1) continue;
       const csvIdent = cols[iIdent].replace(/"/g,'').trim();
       const ourId = identToId[csvIdent];
       if(!ourId) continue;
-      const type = cols[iType].replace(/"/g,'').trim().toUpperCase();
+      const type = cols[iType].replace(/"/g,'').trim();
       const freq = cols[iFreq].replace(/"/g,'').trim();
-      if(!freq || freq === '0') continue;
-
-      if(!FREQ_CACHE[ourId]) FREQ_CACHE[ourId] = {};
-      const fc = FREQ_CACHE[ourId];
-
-      // Map OurAirports type codes to our cache keys
-      if(type.includes('TWR') || type === 'LCL' || type === 'LCL/P'){
-        if(!fc.TWR) fc.TWR = freq;
-      } else if(type.includes('APP') || type.includes('APPROACH') || type.includes('TRACON')){
-        if(!fc.APP) fc.APP = freq;
-      } else if(type.includes('DEP') || type.includes('DEPARTURE')){
-        if(!fc.DEP) fc.DEP = freq;
-      } else if(type.includes('ATIS') || type.includes('AWOS') || type.includes('ASOS')){
-        if(!fc.ATIS) fc.ATIS = freq;
-      } else if(type.includes('GND') || type.includes('GROUND')){
-        if(!fc.GND) fc.GND = freq;
-      } else if(type.includes('CLR') || type.includes('CLNC') || type.includes('DEL')){
-        if(!fc.CD) fc.CD = freq;
-      } else if(type.includes('CTAF')){
-        if(!fc.CTAF) fc.CTAF = freq;
-      } else if(type.includes('UNIC')){
-        if(!fc.UNICOM) fc.UNICOM = freq;
-      } else if(type.includes('CNTR') || type.includes('CTR')){
-        if(!fc.CTR) fc.CTR = freq;
-      }
+      const typeKey = _mapFreqType(type);
+      if(typeKey) _storeFreq(ourId, typeKey, freq);
     }
     _freqCSVLoaded = true;
     const freqCount = Object.keys(FREQ_CACHE).length;
-    console.log(`OurAirports frequencies: ${freqCount} airports with freq data`);
-    toast(`✓ Frequencies loaded for ${freqCount} airports`, 2000);
-    // Cache frequencies to IndexedDB for offline use
+    console.log(`OurAirports frequencies: ${freqCount} airports`);
+    toast(`✓ Frequencies loaded — ${freqCount} airports (community)`, 2000);
     avdPut('frequencies', {...FREQ_CACHE});
+    avdPut('freq_source', 'ourairports');
   } catch(e) {
-    console.warn('Frequency fetch failed:', e.message);
-    // Try loading from offline cache
+    console.warn('OurAirports fetch failed:', e.message);
     const cached = await avdGet('frequencies').catch(()=>null);
     if(cached && Object.keys(cached).length > 0){
       for(const k in FREQ_CACHE) delete FREQ_CACHE[k];
@@ -7246,13 +7350,13 @@ async function loadFAAairspace(forceLat, forceLon){
 
   // FAA official endpoints (org: ssFJjBXIUyZDrSYZ)
   const classURL = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Class_Airspace/FeatureServer/0/query'
-    + '?where=' + encodeURIComponent("CLASS IN ('B','C','D')") + '&outFields=IDENT,NAME,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,COMM_NAME' + base;
+    + '?where=' + encodeURIComponent("CLASS IN ('B','C','D')") + '&outFields=*' + base;
 
   const suaURL = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Special_Use_Airspace/FeatureServer/0/query'
-    + '?where=' + encodeURIComponent("TYPE_CODE IN ('R','A')") + '&outFields=NAME,TYPE_CODE,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE' + base;
+    + '?where=' + encodeURIComponent("TYPE_CODE IN ('R','A')") + '&outFields=*' + base;
 
   const prohibURL = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Prohibited_Areas/FeatureServer/0/query'
-    + '?where=1=1&outFields=NAME,TYPE_CODE,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE' + base;
+    + '?where=1=1&outFields=*' + base;
 
   try{
     const [classResp, suaResp, prohibResp] = await Promise.all([
@@ -7265,19 +7369,28 @@ async function loadFAAairspace(forceLat, forceLon){
 
     const newData = [];
 
+    // Log available fields from first feature for debugging
+    if(classData.features.length > 0){
+      console.log('FAA Class_Airspace fields:', Object.keys(classData.features[0].properties));
+      console.log('FAA Class_Airspace sample:', JSON.stringify(classData.features[0].properties));
+    }
+
     // Class B/C/D airspace
     for(const f of classData.features){
       const p = f.properties;
       const coords = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates];
       for(const poly of coords){
         const ring = poly[0].map(c => [c[1], c[0]]);
-        newData.push({
+        const entry = {
           n: p.NAME || p.IDENT || 'Unknown',
           c: p.CLASS,
           b: Math.round(p.LOWER_VAL || 0),
           t: Math.round(p.UPPER_VAL || 18000),
           p: ring
-        });
+        };
+        if(p.COMM_NAME) entry.comm = p.COMM_NAME;
+        if(p.IDENT)     entry.ident = p.IDENT;
+        newData.push(entry);
       }
     }
 
@@ -7289,7 +7402,7 @@ async function loadFAAairspace(forceLat, forceLon){
         const ring = poly[0].map(c => [c[1], c[0]]);
         newData.push({
           n: p.NAME || 'SUA',
-          c: p.TYPE_CODE === 'R' ? 'RESTRICTED' : 'PROHIBITED',
+          c: p.TYPE_CODE === 'R' ? 'RESTRICTED' : p.TYPE_CODE === 'A' ? 'ALERT' : 'DEFAULT',
           b: Math.round(parseFloat(p.LOWER_VAL) || 0),
           t: Math.round(parseFloat(p.UPPER_VAL) || 18000),
           p: ring
