@@ -6094,42 +6094,16 @@ function drawBirdsEye(){
     roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
-  // Occlusion pass — nearest-first 1° scan, merge contiguous same-owner sweeps.
-  roseCand.sort((a,b)=>a.nearestNm - b.nearestNm);
-  {
-    const owner = new Array(360);
-    for(let b=0;b<360;b++){
-      for(const c of roseCand){
-        let hit = false;
-        for(const iv of c.intervals){
-          if(b >= iv.lo && b <= iv.hi){ hit = true; break; }
-        }
-        if(hit){ owner[b] = c; break; }
-      }
-    }
-    let cur = null;
-    for(let b=0;b<=360;b++){
-      const o = (b<360) ? owner[b] : null;
-      if(o && cur && o === cur.owner){
-        cur.hi = b;
-      } else {
-        if(cur){
-          roseArcs.push({
-            startDeg: cur.lo - hdg,
-            endDeg:   cur.hi - hdg,
-            col: cur.owner.col,
-            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
-          });
-        }
-        cur = o ? {owner:o, lo:b, hi:b} : null;
-      }
-    }
-    if(cur){
+  // Show ALL bars — no occlusion. Sort farthest-first so closest draws on top.
+  roseCand.sort((a,b)=>b.nearestNm - a.nearestNm); // farthest first → closest last (on top)
+  for(const c of roseCand){
+    for(const iv of c.intervals){
       roseArcs.push({
-        startDeg: cur.lo - hdg,
-        endDeg:   cur.hi - hdg,
-        col: cur.owner.col,
-        isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
+        startDeg: iv.lo - hdg,
+        endDeg:   iv.hi - hdg,
+        col: c.col,
+        isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
+        nearestNm: c.nearestNm
       });
     }
   }
@@ -6186,7 +6160,7 @@ function drawBirdsEye(){
   g.restore(); // end circle clip
 
   // ── Compass rose edge: alert arc bars (drawn outside clip, on the band) ──
-  roseArcs.sort((a,b) => a.pri - b.pri);
+  // Already sorted farthest-first so closest draws on top
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
