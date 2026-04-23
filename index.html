@@ -3603,21 +3603,10 @@ function drawAltTape(){
   const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
   if(_altStale){
     _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastHdg=ac.hdg; _altC.lastT=_altNow;
+    // Only show airspaces on the forward heading line or that we're currently inside.
     const hitSet = new Set();
-    const hitMeta = {}; // idx → {nearestNm}
-    // Include airspaces we're currently inside (on the heading line by definition)
-    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
-      const as = _nearbyAS[_ni];
-      const _i = as._idx;
-      if(!asClassVisible[as.c]) continue;
-      if(as.c === 'E') continue;
-      if(pointInPolyAC(_i, as)){
-        hitSet.add(_i);
-        hitMeta[_i] = {nearestNm: 0};
-        continue;
-      }
-    }
-    // Forward probe along exact heading line
+    const hitMeta = {}; // idx → {nearestNm, inside}
+    // Forward probe along exact heading line — only airspaces the heading intersects
     for(let nm = 0.5; nm <= _altProbeMax; nm += 0.5){
       const dd = (nm * 1852) / 111320;
       const pLat = ac.lat + _altCosH * dd;
@@ -3630,29 +3619,30 @@ function drawAltTape(){
         if(as.c === 'E') continue;
         if(pointInPoly(pLat, pLon, as.p)){
           hitSet.add(_i);
-          hitMeta[_i] = {nearestNm: nm};
+          hitMeta[_i] = {nearestNm: nm, inside: false};
         }
       }
     }
-    // Behind-aircraft filter: exclude airspaces entirely 0.1nm+ behind
+    // Also include airspaces we're currently inside (we're literally in them)
+    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
+      const as = _nearbyAS[_ni];
+      const _i = as._idx;
+      if(hitSet.has(_i)) continue;
+      if(!asClassVisible[as.c]) continue;
+      if(as.c === 'E') continue;
+      if(pointInPolyAC(_i, as)){
+        hitSet.add(_i);
+        hitMeta[_i] = {nearestNm: 0, inside: true};
+      }
+    }
+    // Build hits list — forward probe already ensures only heading-line airspaces
     const hits = [];
     for(const _i of hitSet){
-      const as = AIRSPACE_DATA[_i];
-      let maxFwd = -Infinity, minFwd = Infinity;
-      for(let vi = 0; vi < as.p.length; vi++){
-        const dN = (as.p[vi][0] - ac.lat) * 60;
-        const dE = (as.p[vi][1] - ac.lon) * 60 * _altCosLat;
-        const fwd = dN * _altCosH + dE * _altSinH;
-        if(fwd > maxFwd) maxFwd = fwd;
-        if(fwd < minFwd) minFwd = fwd;
-      }
-      if(maxFwd < 0) continue; // exclude anything behind aircraft
-      const fwdDist = Math.max(0, minFwd);
-      hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, fwdDist});
+      const fwdDist = hitMeta[_i].nearestNm;
+      hits.push({idx: _i, nearestNm: fwdDist, fwdDist});
     }
-    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
-    hits.sort((a,b) => a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
-    _altC.hits = hits.slice(0, 3);
+    hits.sort((a,b) => a.fwdDist - b.fwdDist);
+    _altC.hits = hits;
   }
 
   for(const hit of _altC.hits){
