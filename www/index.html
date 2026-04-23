@@ -4218,7 +4218,12 @@ function drawHdgTape(){
       const secTo2=(_hdgSpd>5)?(effNm2/_hdgSpd)*3600:Infinity;
       const threat2=(effNm2<=warnRedNm||secTo2<=warnRedSec)?2:
                     (effNm2<=warnYelNm||secTo2<=warnYelSec)?1:0;
-      htCand.push({intervals:ivs2, bufIntervals:bufIvs2, col:asCol(as.c), threat:threat2, nearestNm:near2});
+      // Vertical buffer info for chevrons
+      const adFloor2=Math.abs(aft-as.b), adCeil2=Math.abs(aft-as.t);
+      const nearBuf2=(adFloor2<=500||adCeil2<=500);
+      let chevDir2=null;
+      if(nearBuf2){if(aft<=as.b)chevDir2='down';else if(aft>=as.t)chevDir2='up';else chevDir2=adFloor2<adCeil2?'down':'up';}
+      htCand.push({intervals:ivs2, bufIntervals:bufIvs2, col:asCol(as.c), threat:threat2, nearestNm:near2, nearBuf:nearBuf2, chevDir:chevDir2});
     }
     // Per-degree nearest-wins scan (same as compass rose)
     const htOwner=new Array(360), htTier=new Uint8Array(360), htDist=new Float32Array(360).fill(Infinity);
@@ -4239,8 +4244,9 @@ function drawHdgTape(){
         if(hit&&c.nearestNm<htDist[b]){htOwner[b]=c;htTier[b]=2;htDist[b]=c.nearestNm;}
       }
     }
-    // Collapse with 1° gaps between different owners
+    // Collapse into contiguous bars, track boundaries between different owners
     const htBars=[];
+    const htSeps=[]; // boundary degrees between different owners
     let htCur=null;
     for(let b=0;b<=360;b++){
       const o=(b<360)?htOwner[b]:null;
@@ -4248,11 +4254,13 @@ function drawHdgTape(){
       if(o&&htCur&&o===htCur.owner&&t===htCur.tier){htCur.hi=b;}
       else{
         if(htCur) htBars.push(htCur);
-        htCur=o?{owner:o,lo:(htCur&&o!==htCur?.owner)?b+1:b,hi:b,tier:t}:null;
+        if(htCur && o && o !== htCur.owner) htSeps.push(b);
+        htCur=o?{owner:o,lo:b,hi:b,tier:t}:null;
       }
     }
     if(htCur) htBars.push(htCur);
     _cc.bars = htBars;
+    _cc.seps = htSeps;
   }
 
   // Draw heading tape bars — matches compass rose appearance
@@ -4289,14 +4297,48 @@ function drawHdgTape(){
           h.fillRect(bx, barY, bw, barH);
           h.globalAlpha = 1;
         }
-        // Screen flash: alert crosses heading center
         if(bx <= cx && (bx + bw) >= cx){
           _screenFlashActive = true;
           _screenFlashCol = isRd ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
         }
       }
+
+      // Chevrons for ±500ft vertical buffer
+      if(bar.owner.nearBuf && bar.owner.chevDir){
+        const chevSz = Math.min(barH * 0.3, 6);
+        const chevCount = Math.max(1, Math.round(bw / 12));
+        h.strokeStyle = '#fff';
+        h.lineWidth = 1.2;
+        h.globalAlpha = 0.85;
+        for(let ci=0; ci<chevCount; ci++){
+          const t2 = chevCount===1 ? 0.5 : ci/(chevCount-1);
+          const px = bx + bw * t2;
+          const midY = barY + barH/2;
+          const dir = bar.owner.chevDir === 'up' ? -1 : 1;
+          h.beginPath();
+          h.moveTo(px - chevSz*0.5, midY - dir*chevSz*0.3);
+          h.lineTo(px, midY + dir*chevSz*0.5);
+          h.lineTo(px + chevSz*0.5, midY - dir*chevSz*0.3);
+          h.stroke();
+        }
+        h.globalAlpha = 1;
+      }
     }
   }
+
+  // White separator lines between different airspace owners
+  h.strokeStyle = '#fff';
+  h.lineWidth = 1;
+  h.globalAlpha = 0.6;
+  for(const sep of (_cc.seps||[])){
+    for(const shift of [-360, 0, 360]){
+      const rel = sep - hdg + shift;
+      if(rel < -65 || rel > 65) continue;
+      const sx = cx + rel * PX_PER_DEG;
+      h.beginPath(); h.moveTo(sx, barY); h.lineTo(sx, barY + barH); h.stroke();
+    }
+  }
+  h.globalAlpha = 1;
 
   // ── Tick marks and labels (every 10°) ──
   const minD = hdg - 65, maxD = hdg + 65;
@@ -6000,7 +6042,8 @@ function drawBirdsEye(){
       }
     }
 
-    // Collapse contiguous same-owner+tier segments into arcs (1° gap between different owners)
+    // Collapse contiguous same-owner+tier segments, track separator positions
+    const roseSeps = []; // boundary degrees between different owners
     let cur = null;
     for(let b=0;b<=360;b++){
       const o = (b<360) ? owner[b] : null;
@@ -6013,11 +6056,12 @@ function drawBirdsEye(){
             startDeg: cur.lo - hdg, endDeg: cur.hi - hdg,
             col: cur.owner.col, threat: cur.owner.threat,
             nearestNm: cur.owner.nearestNm, cls: cur.owner.cls,
-            isBuf: cur.tier === 2
+            isBuf: cur.tier === 2,
+            nearBuf: cur.owner.nearBuf, chevDir: cur.owner.chevDir
           });
         }
-        // Insert 1° gap when switching between different airspace owners
-        cur = o ? {owner:o, lo: (cur && o !== cur?.owner) ? b+1 : b, hi:b, tier:t} : null;
+        if(cur && o && o !== cur.owner) roseSeps.push(b);
+        cur = o ? {owner:o, lo:b, hi:b, tier:t} : null;
       }
     }
     if(cur){
@@ -6025,9 +6069,12 @@ function drawBirdsEye(){
         startDeg: cur.lo - hdg, endDeg: cur.hi - hdg,
         col: cur.owner.col, threat: cur.owner.threat,
         nearestNm: cur.owner.nearestNm, cls: cur.owner.cls,
-        isBuf: cur.tier === 2
+        isBuf: cur.tier === 2,
+        nearBuf: cur.owner.nearBuf, chevDir: cur.owner.chevDir
       });
     }
+    // Store separators for drawing
+    window._roseSeps = roseSeps;
   }
 
   // ── Airport dots (inside rose) ──
@@ -6143,6 +6190,54 @@ function drawBirdsEye(){
       g.stroke();
       g.globalAlpha = 1;
     }
+  }
+
+  // White separator lines between different airspace owners
+  if(window._roseSeps){
+    g.strokeStyle = '#fff';
+    g.lineWidth = 1;
+    g.globalAlpha = 0.6;
+    for(const sep of window._roseSeps){
+      const sepAng = (sep - hdg - 90) * D2R;
+      const sx1 = cx + Math.cos(sepAng) * (roseR - bandW);
+      const sy1 = cy + Math.sin(sepAng) * (roseR - bandW);
+      const sx2 = cx + Math.cos(sepAng) * roseR;
+      const sy2 = cy + Math.sin(sepAng) * roseR;
+      g.beginPath(); g.moveTo(sx1, sy1); g.lineTo(sx2, sy2); g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
+  // Chevrons for ±500ft vertical buffer on compass arcs
+  for(const arc of roseArcs){
+    if(!arc.nearBuf || !arc.chevDir) continue;
+    const a1 = (arc.startDeg - 90) * D2R;
+    const a2 = (arc.endDeg - 90) * D2R;
+    const arcSpan = Math.abs(a2 - a1);
+    const chevCount = Math.max(1, Math.round(arcSpan / 0.25));
+    const chevR = roseR - bandW/2;
+    const chevSz = Math.min(bandW * 0.35, 5);
+    g.strokeStyle = '#fff';
+    g.lineWidth = 1.5;
+    g.globalAlpha = 0.85;
+    for(let ci=0; ci<chevCount; ci++){
+      const t2 = chevCount===1 ? 0.5 : ci/(chevCount-1);
+      const ang = a1 + (a2 - a1) * t2;
+      const px = cx + Math.cos(ang) * chevR;
+      const py = cy + Math.sin(ang) * chevR;
+      const radAng = Math.atan2(py - cy, px - cx);
+      const dir = arc.chevDir === 'up' ? 1 : -1;
+      const tipX = px + Math.cos(radAng) * chevSz * dir;
+      const tipY = py + Math.sin(radAng) * chevSz * dir;
+      const perpX = Math.cos(radAng + Math.PI/2) * chevSz * 0.6;
+      const perpY = Math.sin(radAng + Math.PI/2) * chevSz * 0.6;
+      g.beginPath();
+      g.moveTo(px - perpX - Math.cos(radAng)*chevSz*0.3*dir, py - perpY - Math.sin(radAng)*chevSz*0.3*dir);
+      g.lineTo(tipX, tipY);
+      g.lineTo(px + perpX - Math.cos(radAng)*chevSz*0.3*dir, py + perpY - Math.sin(radAng)*chevSz*0.3*dir);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
   }
 
   // ── Compass rose ring border ──
