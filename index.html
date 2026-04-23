@@ -3327,15 +3327,15 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
   const d = dir || 'up';
   ctx.save();
   ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
-  // Class-colored background
-  ctx.fillStyle = hatchCol;
-  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
+  // Tape-colored background
+  ctx.fillStyle = C.TAPE;
+  ctx.globalAlpha = 1;
   ctx.fillRect(rx, ry, rw, rh);
-  // Dark tape-colored chevron arrows
-  ctx.strokeStyle = C.TAPE;
+  // Class-colored chevron arrows (matches airspace bar color)
+  ctx.strokeStyle = hatchCol;
   ctx.lineWidth = Math.max(2, Math.min(Math.max(rw, rh) * 0.1, 4));
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
   const isVert = (d === 'up' || d === 'down');
   if(isVert){
     const aw = Math.min(rw * 0.7, 24); // full-width chevron
