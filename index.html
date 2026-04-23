@@ -4216,34 +4216,59 @@ function drawHdgTape(){
       const isRed2=(effNm2<=warnRedNm||secTo2<=warnRedSec);
       const isYel2=!isRed2&&(effNm2<=warnYelNm||secTo2<=warnYelSec);
       const pri2=isRed2?2:isYel2?1:0;
-      htCand.push({intervals:ivs2, col:asCol(as.c), isRed:isRed2, isYellow:isYel2, pri:pri2, nearestNm:near2});
+      // Buffer intervals (expand by horizBufferNm angle, capped 8°)
+      const bufIvs2=[];
+      if(horizBufferNm>0 && near2>0.01){
+        const exp2=Math.min(8,Math.atan(horizBufferNm/near2)*180/Math.PI);
+        for(const iv of ivs2){let bl=iv.lo-exp2;if(bl<0)bl+=360;let bh=iv.hi+exp2;if(bh>360)bh-=360;bufIvs2.push({lo:bl,hi:bh});}
+      }
+      htCand.push({intervals:ivs2, bufIntervals:bufIvs2, col:asCol(as.c), isRed:isRed2, isYellow:isYel2, pri:pri2, nearestNm:near2});
     }
-    // Occlusion pass — nearest-first, 0.5° resolution (same as compass rose)
+    // Occlusion pass — nearest-first, 0.5° resolution
     htCand.sort((a,b)=>a.nearestNm-b.nearestNm);
     const STEPS=720;
     const htOwner=new Array(STEPS);
+    const htTier=new Uint8Array(STEPS); // 1=actual, 2=buffer
+    // Pass 1: actual airspace
     for(let b=0;b<STEPS;b++){
       const deg=b*0.5;
       for(const c of htCand){
         let hit=false;
         for(const iv of c.intervals){ if(deg>=iv.lo&&deg<=iv.hi){hit=true;break;} }
-        if(hit){htOwner[b]=c;break;}
+        if(hit){htOwner[b]=c;htTier[b]=1;break;}
       }
     }
-    // Collapse into contiguous arcs
+    // Pass 2: buffer zones — only unclaimed degrees (no abutting airspace)
+    for(let b=0;b<STEPS;b++){
+      if(htTier[b]) continue; // already owned by actual airspace — no buffer here
+      const deg=b*0.5;
+      for(const c of htCand){
+        if(!c.bufIntervals.length) continue;
+        let inBuf=false;
+        for(const iv of c.bufIntervals){if(deg>=iv.lo&&deg<=iv.hi){inBuf=true;break;}}
+        if(!inBuf) continue;
+        // Skip if this degree is within the actual interval
+        let inAct=false;
+        for(const iv of c.intervals){if(deg>=iv.lo&&deg<=iv.hi){inAct=true;break;}}
+        if(inAct) continue;
+        htOwner[b]=c;htTier[b]=2;break;
+      }
+    }
+    // Collapse into contiguous arcs with tier
     const htArcs=[];
     let htCur=null;
     for(let b=0;b<=STEPS;b++){
       const o=(b<STEPS)?htOwner[b]:null;
-      if(o&&htCur&&o===htCur.owner){htCur.hi=b*0.5;}
+      const t=(b<STEPS)?htTier[b]:0;
+      if(o&&htCur&&o===htCur.owner&&t===htCur.tier){htCur.hi=b*0.5;}
       else{
-        if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri});
-        htCur=o?{owner:o,lo:b*0.5,hi:b*0.5}:null;
+        if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2});
+        htCur=o?{owner:o,lo:b*0.5,hi:b*0.5,tier:t}:null;
       }
     }
-    if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri});
-    // Sort by priority: non-alert first, yellow, red on top
-    htArcs.sort((a,b)=>a.pri-b.pri);
+    if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2});
+    // Sort: buffer behind, then by priority
+    htArcs.sort((a,b)=>(a.isBuf?0:1)-(b.isBuf?0:1) || a.pri-b.pri);
     _cc.arcs = htArcs;
   }
 
@@ -4261,26 +4286,54 @@ function drawHdgTape(){
       const bw = Math.max(x2-x1, 2) + 1;
       const bx = x1 - 0.5;
 
-      // Base bar: class color at 0.5
-      h.fillStyle = arc.col;
-      h.globalAlpha = 0.5;
-      h.fillRect(bx, barY, bw, barH);
-      h.globalAlpha = 1;
-
-      // Alert overlay
-      if(arc.isRed || arc.isYellow){
-        const show = alertFlashOn
-          ? (arc.isRed ? Math.floor(nowF/250)%2===0 : Math.floor(nowF/500)%2===0) : true;
-        if(show){
-          h.fillStyle = arc.isRed ? C.RED : C.YEL;
-          h.globalAlpha = 0.75;
-          h.fillRect(bx, barY, bw, barH);
-          h.globalAlpha = 1;
+      if(arc.isBuf){
+        // Buffer bar: white background with class-colored chevrons (inverted)
+        h.fillStyle = '#fff';
+        h.globalAlpha = 0.25;
+        h.fillRect(bx, barY, bw, barH);
+        h.globalAlpha = 1;
+        // Chevrons in class color
+        const chevSz = Math.min(barH * 0.3, 6);
+        const chevCount = Math.max(1, Math.round(bw / 10));
+        h.strokeStyle = arc.col;
+        h.lineWidth = 1.5;
+        h.globalAlpha = 0.8;
+        for(let ci=0; ci<chevCount; ci++){
+          const t2 = chevCount===1 ? 0.5 : ci/(chevCount-1);
+          const px = bx + bw * t2;
+          const midY = barY + barH/2;
+          // Point outward (away from airspace center — toward the actual bar edge)
+          const barCenter = bx + bw/2;
+          const dir = px < barCenter ? -1 : 1; // left side points left, right side points right
+          h.beginPath();
+          h.moveTo(px - dir*chevSz*0.4, midY - chevSz*0.4);
+          h.lineTo(px + dir*chevSz*0.4, midY);
+          h.lineTo(px - dir*chevSz*0.4, midY + chevSz*0.4);
+          h.stroke();
         }
-        // Screen flash: alert crosses heading center
-        if(bx <= cx && (bx + bw) >= cx){
-          _screenFlashActive = true;
-          _screenFlashCol = arc.isRed ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
+        h.globalAlpha = 1;
+      } else {
+        // Actual airspace bar: class color at 0.5
+        h.fillStyle = arc.col;
+        h.globalAlpha = 0.5;
+        h.fillRect(bx, barY, bw, barH);
+        h.globalAlpha = 1;
+
+        // Alert overlay
+        if(arc.isRed || arc.isYellow){
+          const show = alertFlashOn
+            ? (arc.isRed ? Math.floor(nowF/250)%2===0 : Math.floor(nowF/500)%2===0) : true;
+          if(show){
+            h.fillStyle = arc.isRed ? C.RED : C.YEL;
+            h.globalAlpha = 0.75;
+            h.fillRect(bx, barY, bw, barH);
+            h.globalAlpha = 1;
+          }
+          // Screen flash: alert crosses heading center
+          if(bx <= cx && (bx + bw) >= cx){
+            _screenFlashActive = true;
+            _screenFlashCol = arc.isRed ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
+          }
         }
       }
 
