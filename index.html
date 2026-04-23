@@ -2952,7 +2952,7 @@ async function showAirportPopup(ap){
           const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
         }
         const ratio = Math.pow(2, dy/window.innerHeight*2);
-        bevRangeNm = Math.max(2, Math.min(100, rangeStart*ratio));
+        bevRangeNm = Math.max(0.5, Math.min(100, rangeStart*ratio));
       }
     }
   }, {passive:false});
@@ -2980,7 +2980,7 @@ async function showAirportPopup(ap){
       bevAutoRange = false;
       const b=document.getElementById('bevAutoRangeBtn'); if(b) b.classList.remove('on');
     }
-    bevRangeNm = Math.max(2, Math.min(100, bevRangeNm + e.deltaY*0.05));
+    bevRangeNm = Math.max(0.5, Math.min(100, bevRangeNm + e.deltaY*0.05));
   }, {passive:false});
 })();
 
@@ -5900,8 +5900,8 @@ function drawBirdsEye(){
   if(bevAutoRange){
     bevRangeNm = calcAutoProfileRange();
   }
-  // Manual zoom clamp — pinch/wheel allowed between 2 and 60 nm
-  bevRangeNm = Math.max(2, Math.min(100, bevRangeNm));
+  // Manual zoom clamp — pinch/wheel allowed between 0.5 and 100 nm
+  bevRangeNm = Math.max(0.5, Math.min(100, bevRangeNm));
   const scale = (roseR - bandW) / bevRangeNm; // nm to px within rose
 
   function toScreen(lat, lon){
@@ -6013,6 +6013,11 @@ function drawBirdsEye(){
     const isRed = !insideAs && atAlt && (effNmRose <= warnRedNm || secToRose <= warnRedSec);
     const isYellow = !isRed && !insideAs && atAlt && (effNmRose <= warnYelNm || secToRose <= warnYelSec);
     const pri = isRed ? 2 : isYellow ? 1 : 0;
+    // Forward proximity alert (for bar flashing)
+    const fwdEffNm = Math.max(0, fwdNm - horizBufferNm);
+    const fwdSecTo = (spd > 5 && fwdNm < Infinity) ? (fwdEffNm / spd) * 3600 : Infinity;
+    const fwdAlertRed = !insideAs && (fwdEffNm <= warnRedNm || fwdSecTo <= warnRedSec);
+    const fwdAlertYel = !fwdAlertRed && !insideAs && (fwdEffNm <= warnYelNm || fwdSecTo <= warnYelSec);
 
     // Draw polygon (clipped to rose) — skip if AUTO AIRSPACE hides non-at-alt
     if(!skipPoly){
@@ -6094,7 +6099,7 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, fwdAlertRed, fwdAlertYel});
   }
 
   // Occlusion pass — nearest-first 0.5° scan, merge contiguous same-owner sweeps.
@@ -6124,7 +6129,7 @@ function drawBirdsEye(){
             endDeg:   cur.hi - hdg,
             col: cur.owner.col,
             isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri,
-            nearestNm: cur.owner.nearestNm
+            nearestNm: cur.owner.nearestNm, fwdAlertRed: cur.owner.fwdAlertRed, fwdAlertYel: cur.owner.fwdAlertYel
           });
         }
         cur = o ? {owner:o, lo:b*0.5, hi:b*0.5} : null;
@@ -6197,7 +6202,7 @@ function drawBirdsEye(){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
 
-    // Class color arc only — no alert overlay on bars (alerts flash on polygon)
+    // Base class color arc
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
@@ -6205,6 +6210,21 @@ function drawBirdsEye(){
     g.globalAlpha = 0.5;
     g.stroke();
     g.globalAlpha = 1;
+
+    // Flash bar when forward proximity alert fires
+    if(arc.fwdAlertRed || arc.fwdAlertYel){
+      const isRd = arc.fwdAlertRed;
+      const show = alertFlashOn ? (isRd ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+      if(show){
+        g.beginPath();
+        g.arc(cx, cy, roseR - bandW/2, a1, a2);
+        g.strokeStyle = isRd ? C.RED : C.YEL;
+        g.lineWidth = bandW;
+        g.globalAlpha = isRd ? 0.75 : 0.55;
+        g.stroke();
+        g.globalAlpha = 1;
+      }
+    }
   }
 
   // Separator lines at arc edges — colored by alert state
