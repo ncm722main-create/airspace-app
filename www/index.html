@@ -6111,6 +6111,23 @@ function drawBirdsEye(){
     }
   }
 
+  // White separator lines at arc edges
+  g.strokeStyle = '#fff';
+  g.lineWidth = 1;
+  g.globalAlpha = 0.6;
+  for(const arc of roseArcs){
+    const a1 = (arc.startDeg - 90) * D2R;
+    const a2 = (arc.endDeg - 90) * D2R;
+    for(const ang of [a1, a2]){
+      const x1 = cx + Math.cos(ang) * (roseR - bandW);
+      const y1 = cy + Math.sin(ang) * (roseR - bandW);
+      const x2 = cx + Math.cos(ang) * roseR;
+      const y2 = cy + Math.sin(ang) * roseR;
+      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    }
+  }
+  g.globalAlpha = 1;
+
   // ── Compass rose ring border ──
   g.strokeStyle = 'rgba(255,255,255,.25)';
   g.lineWidth = 1;
