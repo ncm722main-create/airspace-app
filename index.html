@@ -6082,6 +6082,20 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
+
+    // Horizontal buffer expansion — expand intervals by buffer angle
+    const _bufIvs = [];
+    if(horizBufferNm > 0 && _nearestNm > 0.01){
+      const bufExpand = Math.atan(horizBufferNm / _nearestNm) * (180/Math.PI);
+      for(const iv of _ivs){
+        let bLo = iv.lo - bufExpand;
+        let bHi = iv.hi + bufExpand;
+        if(bLo < 0) bLo += 360;
+        if(bHi > 360) bHi -= 360;
+        _bufIvs.push({lo: bLo, hi: bHi});
+      }
+    }
+
     // Vertical buffer: chevrons for airspaces within ±500ft of aircraft
     const altDiffFloor = Math.abs(aft - as.b);
     const altDiffCeil  = Math.abs(aft - as.t);
@@ -6094,7 +6108,13 @@ function drawBirdsEye(){
     }
     // Is aircraft inside this airspace's horizontal buffer zone?
     const inHorizBuf = (_nearestNm <= horizBufferNm);
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir, inHorizBuf});
+
+    // Push actual airspace bar
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir, inHorizBuf, isBufBar: false});
+    // Push horizontal buffer bar (drawn behind actual)
+    if(_bufIvs.length > 0 && !inHorizBuf){
+      roseCand.push({intervals: _bufIvs, col, isRed: false, isYellow: false, pri: 0, nearestNm: _nearestNm + horizBufferNm, nearBuf, chevDir, inHorizBuf: false, isBufBar: true});
+    }
   }
 
   // Sort: farthest first → closest last (on top). Forward bars on top of side bars.
@@ -6108,15 +6128,17 @@ function drawBirdsEye(){
         startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
         col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
         nearestNm: c.nearestNm, fwdDist,
-        nearBuf: c.nearBuf, chevDir: c.chevDir, inHorizBuf: c.inHorizBuf
+        nearBuf: c.nearBuf, chevDir: c.chevDir, inHorizBuf: c.inHorizBuf,
+        isBufBar: c.isBufBar || false
       });
     }
   }
-  // Draw order: buffer bars behind → all others by distance (closest on top)
+  // Draw order: buffer zone bars → inside-buffer bars → actual bars (closest on top)
   roseArcs.sort((a,b) => {
-    const bufA = a.inHorizBuf ? 0 : 1;
-    const bufB = b.inHorizBuf ? 0 : 1;
-    if(bufA !== bufB) return bufA - bufB;
+    // Layer 0: buffer zone bars (expanded outline) draw first
+    const layerA = a.isBufBar ? 0 : a.inHorizBuf ? 1 : 2;
+    const layerB = b.isBufBar ? 0 : b.inHorizBuf ? 1 : 2;
+    if(layerA !== layerB) return layerA - layerB;
     return b.nearestNm - a.nearestNm;
   });
 
@@ -6177,12 +6199,12 @@ function drawBirdsEye(){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
 
-    // Base color arc (buffer bars drawn dimmer)
+    // Base color arc (buffer zone bars drawn dimmer)
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
     g.lineWidth = bandW;
-    g.globalAlpha = arc.inHorizBuf ? 0.25 : 0.5;
+    g.globalAlpha = arc.isBufBar ? 0.2 : arc.inHorizBuf ? 0.3 : 0.5;
     g.stroke();
     g.globalAlpha = 1;
 
