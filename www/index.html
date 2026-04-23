@@ -6089,7 +6089,7 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, asFloor: as.b, asCeil: as.t});
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
   // Show ALL bars — no occlusion.
@@ -6098,30 +6098,13 @@ function drawBirdsEye(){
   roseCand.sort((a,b)=>b.nearestNm - a.nearestNm);
   for(const c of roseCand){
     for(const iv of c.intervals){
-      let relLo = iv.lo - hdg; while(relLo>180) relLo-=360; while(relLo<-180) relLo+=360;
-      let relHi = iv.hi - hdg; while(relHi>180) relHi-=360; while(relHi<-180) relHi+=360;
-      // Check if heading (0°) falls within this arc's bearing span
-      const arcCoversHdg = (relLo <= 0 && relHi >= 0) || (relLo >= 0 && relHi <= 0)
-        || Math.min(Math.abs(relLo), Math.abs(relHi)) < 2;
       let midBrg = ((iv.lo + iv.hi) / 2) - hdg;
       while(midBrg > 180) midBrg -= 360; while(midBrg < -180) midBrg += 360;
       const fwdDist = Math.abs(midBrg);
-      // Chevron info: within ±500ft of aircraft altitude
-      const altDiffFloor = Math.abs(aft - c.asFloor);
-      const altDiffCeil  = Math.abs(aft - c.asCeil);
-      const nearBuf = (altDiffFloor <= 500 || altDiffCeil <= 500);
-      // Chevron direction: point toward clearance (away from airspace altitude)
-      // If closer to floor → go down (below floor); if closer to ceil → go up (above ceil)
-      let chevDir = null;
-      if(nearBuf){
-        if(aft <= c.asFloor) chevDir = 'down';       // below floor → keep descending
-        else if(aft >= c.asCeil) chevDir = 'up';      // above ceil → keep climbing
-        else chevDir = altDiffFloor < altDiffCeil ? 'down' : 'up'; // inside → nearest exit
-      }
       roseArcs.push({
         startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
         col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
-        nearestNm: c.nearestNm, fwdDist, arcCoversHdg, nearBuf, chevDir
+        nearestNm: c.nearestNm, fwdDist
       });
     }
   }
@@ -6214,37 +6197,6 @@ function drawBirdsEye(){
       }
     }
 
-    // Chevrons for altitude buffer (within ±500ft) — point toward clearance
-    if(arc.nearBuf && arc.chevDir){
-      const arcMid = (a1 + a2) / 2;
-      const arcSpan = Math.abs(a2 - a1);
-      // Place chevrons along the arc at intervals
-      const chevCount = Math.max(1, Math.round(arcSpan / 0.25));
-      const chevR = roseR - bandW/2;
-      const chevSz = Math.min(bandW * 0.35, 5);
-      g.strokeStyle = '#fff';
-      g.lineWidth = 1.5;
-      g.globalAlpha = 0.9;
-      for(let ci = 0; ci < chevCount; ci++){
-        const t = chevCount === 1 ? 0.5 : ci / (chevCount - 1);
-        const ang = a1 + (a2 - a1) * t;
-        const px = cx + Math.cos(ang) * chevR;
-        const py = cy + Math.sin(ang) * chevR;
-        // Chevron points radially: 'up' = outward (away from center), 'down' = inward
-        const radAng = Math.atan2(py - cy, px - cx);
-        const dir = arc.chevDir === 'up' ? 1 : -1; // outward or inward
-        const tipX = px + Math.cos(radAng) * chevSz * dir;
-        const tipY = py + Math.sin(radAng) * chevSz * dir;
-        const perpX = Math.cos(radAng + Math.PI/2) * chevSz * 0.6;
-        const perpY = Math.sin(radAng + Math.PI/2) * chevSz * 0.6;
-        g.beginPath();
-        g.moveTo(px - perpX - Math.cos(radAng)*chevSz*0.3*dir, py - perpY - Math.sin(radAng)*chevSz*0.3*dir);
-        g.lineTo(tipX, tipY);
-        g.lineTo(px + perpX - Math.cos(radAng)*chevSz*0.3*dir, py + perpY - Math.sin(radAng)*chevSz*0.3*dir);
-        g.stroke();
-      }
-      g.globalAlpha = 1;
-    }
   }
 
   // ── Compass rose ring border ──
