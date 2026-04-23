@@ -4429,8 +4429,9 @@ function drawHdgTape(){
     }
   }
 
-  // ── Draw: buffer behind solid, alerts always on top, closest on top within same level ──
-  // Hatched (buffer) behind solid, then alert overlays on top of everything
+  // ── Draw: farthest first, closest on top. Buffer behind solid, alerts on top of all. ──
+  hdgHatch.sort((a,b) => b.nearestNm - a.nearestNm);
+  hdgSolid.sort((a,b) => b.nearestNm - a.nearestNm);
   for(const bar of hdgHatch){
     h.save();
     h.beginPath();
