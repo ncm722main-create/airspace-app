@@ -833,12 +833,6 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin:8px 0 4px;">
       Vertical speed alerts — flash when |VS| exceeds threshold.
     </div>
-    <div style="display:flex;gap:4px;margin:4px 0;">
-      <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">VS CAUTION FPM</label>
-        <input class="sinput" id="wYelVsFpm" type="number" step="50" min="100" value="500" style="border-color:rgba(255,204,0,.4)" onchange="updateWarnThresholds()"></div>
-      <div style="flex:1"><label style="font:8px var(--mono);color:#ff4444">VS ALERT FPM</label>
-        <input class="sinput" id="wRedVsFpm" type="number" step="50" min="100" value="1000" style="border-color:rgba(255,51,51,.4)" onchange="updateWarnThresholds()"></div>
-    </div>
     <!-- Row 6: Buffers -->
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin:8px 0 4px;">
       Clearance buffers — VS targets floor±buffer, heading alerts trigger buffer-nm earlier.
@@ -5085,21 +5079,6 @@ function drawProfile(){
     const vsToFloorP=(as.b-aft)/minToAsP;
     const vsToCeilP=(as.t-aft)/minToAsP;
     function fmtVSp(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
-    // Airspace-bar alert: thresholds apply to |required VS value| on the airspace bar.
-    // Aircraft VS does NOT trigger alerts — only the airspace bar does.
-    function vsAlertP(edgeVal){
-      const a = Math.abs(edgeVal);
-      const red = a > warnRedVsFpm;
-      const yel = !red && a > warnYelVsFpm;
-      return {red, yel};
-    }
-    function addFlashOverlay(topPx, hPx, red, yel){
-      if(!red && !yel) return;
-      const flash = red?(Math.floor(_nowTP/250)%2===0):(Math.floor(_nowTP/500)%2===0);
-      if(alertFlashOn?flash:true){
-        bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.max(0,topPx)+'px;height:'+hPx+'px;background:'+(red?'rgba(255,50,50,.5)':'rgba(255,204,0,.5)')+';pointer-events:none"></div>';
-      }
-    }
     // --- TOP HALF: ceiling zone (positive VS / climbing) ---
     const ceilValP=Math.max(vsToFloorP,vsToCeilP);
     if(ceilValP>0){
@@ -5109,8 +5088,6 @@ function drawProfile(){
       const fillHc=Math.max(2,y2c-y1c);
       if(fillHc>0){
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.max(0,y1c)+'px;height:'+fillHc+'px;background:'+col+';opacity:0.3;pointer-events:none"></div>';
-        const a = vsAlertP(ceilValP);
-        addFlashOverlay(y1c, fillHc, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y1c)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
         bkL+='<div style="position:absolute;left:2px;top:'+(y1c-12)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(ceilValP)+'</div>';
       }
@@ -5124,8 +5101,6 @@ function drawProfile(){
       const fillHf=Math.max(2,y2f-y1f);
       if(fillHf>0){
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.max(0,y1f)+'px;height:'+fillHf+'px;background:'+col+';opacity:0.3;pointer-events:none"></div>';
-        const a = vsAlertP(floorValP);
-        addFlashOverlay(y1f, fillHf, a.red, a.yel);
         bkL+='<div style="position:absolute;left:0;right:0;top:'+Math.round(y2f)+'px;border-top:2px dashed '+col+';pointer-events:none"></div>';
         bkL+='<div style="position:absolute;left:2px;top:'+(y2f+2)+'px;font:bold 10px var(--mono);color:'+col+';pointer-events:none;white-space:nowrap">'+fmtVSp(floorValP)+'</div>';
       }
@@ -6270,17 +6245,6 @@ function drawHudVSbar(){
 
   // Helper functions (defined once, used for each airspace)
   function fmtVS(v){const a=Math.abs(Math.round(v));const s=v>=0?'+':'-';return a>=1000?s+(a/1000).toFixed(1)+'K':s+a;}
-  function vsAlert(edgeVal){
-    const a = Math.abs(edgeVal);
-    const red = a > warnRedVsFpm;
-    const yel = !red && a > warnYelVsFpm;
-    return {red, yel};
-  }
-  function drawDangerFlash(rectY, rectH, red, yel){
-    if(!red && !yel) return;
-    const show=alertFlashOn?(red?Math.floor(nowT3/250)%2===0:Math.floor(nowT3/500)%2===0):true;
-    if(show){ h.fillStyle=red?C.RED:C.YEL; h.globalAlpha=0.65; h.fillRect(x,rectY,barW,rectH); h.globalAlpha=1; }
-  }
   function drawHatchRect(rx,ry,rw,rh,hatchCol,dir){
     hatchFillRect(h, rx, ry, rw, rh, hatchCol, 0.45, dir);
   }
@@ -6359,8 +6323,7 @@ function drawHudVSbar(){
       if(y2c>y1c){
         h.fillStyle=col;h.globalAlpha=0.3;
         h.fillRect(x,y1c,barW,y2c-y1c);h.globalAlpha=1;
-        const a = vsAlert(ceilBufVal);
-        drawDangerFlash(y1c, y2c-y1c, a.red, a.yel);
+
         h.strokeStyle=col;h.lineWidth=2;h.setLineDash([4,3]);
         h.beginPath();h.moveTo(x,y1c);h.lineTo(x+barW,y1c);h.stroke();h.setLineDash([]);
         h.fillStyle=col;h.font="bold 9px 'Share Tech Mono',monospace";h.textAlign='left';
@@ -6374,8 +6337,7 @@ function drawHudVSbar(){
       const yBufTop=vsY(bufTop), yBufBot=vsY(bufBot);
       if(yBufBot>yBufTop){
         drawHatchRect(x,yBufTop,barW,yBufBot-yBufTop,col,'up');
-        const ab = vsAlert(ceilBufVal);
-        drawDangerFlash(yBufTop, yBufBot-yBufTop, ab.red, ab.yel);
+
         h.strokeStyle=col;h.lineWidth=1.5;h.setLineDash([3,3]);
         h.beginPath();h.moveTo(x,yBufTop);h.lineTo(x+barW,yBufTop);h.stroke();h.setLineDash([]);
         h.fillStyle=col;h.font="bold 8px 'Share Tech Mono',monospace";h.textAlign='left';
@@ -6393,8 +6355,7 @@ function drawHudVSbar(){
       if(y2f>y1f){
         h.fillStyle=col;h.globalAlpha=0.3;
         h.fillRect(x,y1f,barW,y2f-y1f);h.globalAlpha=1;
-        const a = vsAlert(floorBufVal);
-        drawDangerFlash(y1f, y2f-y1f, a.red, a.yel);
+
         h.strokeStyle=col;h.lineWidth=2;h.setLineDash([4,3]);
         h.beginPath();h.moveTo(x,y2f);h.lineTo(x+barW,y2f);h.stroke();h.setLineDash([]);
         h.fillStyle=col;h.font="bold 9px 'Share Tech Mono',monospace";h.textAlign='left';
@@ -6408,8 +6369,7 @@ function drawHudVSbar(){
       const yBufTop=vsY(bufTop), yBufBot=vsY(bufBot);
       if(yBufBot>yBufTop){
         drawHatchRect(x,yBufTop,barW,yBufBot-yBufTop,col,'down');
-        const ab = vsAlert(floorBufVal);
-        drawDangerFlash(yBufTop, yBufBot-yBufTop, ab.red, ab.yel);
+
         h.strokeStyle=col;h.lineWidth=1.5;h.setLineDash([3,3]);
         h.beginPath();h.moveTo(x,yBufBot);h.lineTo(x+barW,yBufBot);h.stroke();h.setLineDash([]);
         h.fillStyle=col;h.font="bold 8px 'Share Tech Mono',monospace";h.textAlign='left';
