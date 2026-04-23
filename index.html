@@ -4416,11 +4416,11 @@ function drawHdgTape(){
     }
   }
 
-  // Sort: buffers behind solids, non-alert behind alert, farthest behind closest
+  // Sort: non-alert behind alert, farthest behind closest
+  // Buffer bars inside the buffer zone (_alert=true) draw in front of non-factor airspaces
   hdgBarsAll.sort((a,b) => {
-    if(a.tier !== b.tier) return a.tier === 2 ? -1 : 1; // buffer behind solid
-    if(a._alert !== b._alert) return a._alert ? 1 : -1; // alert on top
-    return b.nearestNm - a.nearestNm; // farthest behind
+    if(a._alert !== b._alert) return a._alert ? 1 : -1;
+    return b.nearestNm - a.nearestNm;
   });
 
   // Sort: non-alert behind alert, farthest behind closest
