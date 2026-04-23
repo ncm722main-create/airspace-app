@@ -4276,10 +4276,10 @@ function drawHdgTape(){
         }
       }
 
-      // White edge lines
-      h.strokeStyle = '#fff'; h.lineWidth = 1; h.globalAlpha = 0.6;
-      h.beginPath(); h.moveTo(bx, barY); h.lineTo(bx, barY+barH); h.stroke();
-      h.beginPath(); h.moveTo(bx+bw, barY); h.lineTo(bx+bw, barY+barH); h.stroke();
+      // White edge lines — wide enough to fill gap between adjacent bars
+      h.fillStyle = '#fff'; h.globalAlpha = 0.6;
+      h.fillRect(bx - 1, barY, 2, barH);
+      h.fillRect(bx + bw - 1, barY, 2, barH);
       h.globalAlpha = 1;
     }
   }
@@ -6052,9 +6052,9 @@ function drawBirdsEye(){
     }
   }
 
-  // White separator lines at arc edges
+  // White separator lines at arc edges — wide enough to fill gaps
   g.strokeStyle = '#fff';
-  g.lineWidth = 1;
+  g.lineWidth = 2;
   g.globalAlpha = 0.6;
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
