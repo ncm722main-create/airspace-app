@@ -2815,8 +2815,8 @@ document.addEventListener('keyup',  e=>{keysDown[e.code]=false;});
     const cosH = Math.cos(hdgR), sinH = Math.sin(hdgR);
     // Screen: dx=right, dy=down. World: north=+lat, east=+lon.
     // drag-up(dy<0) → forward along heading, drag-right(dx>0) → right of heading
-    const worldN = -dy * cosH - dx * sinH; // north component
-    const worldE = -dy * sinH + dx * cosH; // east component
+    const worldN = dy * cosH + dx * sinH; // north component (inverted)
+    const worldE = dy * sinH - dx * cosH; // east component (inverted)
     ac.lat = panBaseLat + worldN * scale;
     ac.lon = panBaseLon + worldE * scale / cosLat;
     if(ac.lat > 85) ac.lat = 85;
