@@ -4368,9 +4368,11 @@ function drawHdgTape(){
     }
     if(cur) out.push(cur);
     _cc.airspaces = out;
+    _cc.cand = cand;
   }
 
   // ── Build unified bars per airspace: solid center + buffer sides as one unit ──
+  const cand = _cc.cand || [];
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
