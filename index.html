@@ -6112,17 +6112,11 @@ function drawBirdsEye(){
       });
     }
   }
-  // Draw order: buffer bars behind everything → side bars → forward bars on top
+  // Draw order: buffer bars behind → all others by distance (closest on top)
   roseArcs.sort((a,b) => {
-    // Layer 0: inside horizontal buffer → draw first (behind all)
     const bufA = a.inHorizBuf ? 0 : 1;
     const bufB = b.inHorizBuf ? 0 : 1;
     if(bufA !== bufB) return bufA - bufB;
-    // Layer 1 vs 2: side bars before forward bars
-    const fwdA = a.fwdDist <= 30 ? 1 : 0;
-    const fwdB = b.fwdDist <= 30 ? 1 : 0;
-    if(fwdA !== fwdB) return fwdA - fwdB;
-    // Within same layer: farther before closer
     return b.nearestNm - a.nearestNm;
   });
 
