@@ -4411,29 +4411,44 @@ function drawHdgTape(){
     return b.nearestNm - a.nearestNm; // farthest behind
   });
 
-  // Pass 1: Non-alert bars (buffer + solid)
+  // Check if any forward proximity alert is active
+  const hasForwardAlert = hdgBarsAll.some(b => b._alert && b.tier === 1);
+
+  // Pass 1: Non-alert solid bars (background)
   for(const bar of hdgBarsAll){
-    if(bar._alert) continue;
-    if(bar.tier === 2){
+    if(bar._alert || bar.tier === 2) continue;
+    h.fillStyle = bar.col; h.globalAlpha = 0.50;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  // Pass 2: Buffer/chevron bars — in front of solid bars unless forward alert overrides
+  if(!hasForwardAlert){
+    // No forward alert: chevrons show in front of all solid bars
+    for(const bar of hdgBarsAll){
+      if(bar.tier !== 2) continue;
       hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-    } else {
-      h.fillStyle = bar.col; h.globalAlpha = 0.50;
-      h.fillRect(bar.x, barY, bar.w, barH);
-      h.globalAlpha = 1;
     }
   }
-  // Pass 2: Alert bars on top of non-alert (buffer + solid)
+  // Pass 3: Alert solid bars on top
   for(const bar of hdgBarsAll){
-    if(!bar._alert) continue;
-    if(bar.tier === 2){
+    if(!bar._alert || bar.tier === 2) continue;
+    h.fillStyle = bar.col; h.globalAlpha = 0.50;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  // Pass 4: If forward alert active, chevrons draw behind the alert bars
+  if(hasForwardAlert){
+    for(const bar of hdgBarsAll){
+      if(bar.tier !== 2 || bar._alert) continue;
       hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-    } else {
-      h.fillStyle = bar.col; h.globalAlpha = 0.50;
-      h.fillRect(bar.x, barY, bar.w, barH);
-      h.globalAlpha = 1;
+    }
+    // Alert chevrons on top of non-alert chevrons
+    for(const bar of hdgBarsAll){
+      if(bar.tier !== 2 || !bar._alert) continue;
+      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
     }
   }
-  // Pass 3: Flashing red/yellow overlays on top of everything
+  // Pass 5: Flashing red/yellow overlays on top of everything
   for(const bar of hdgBarsAll){
     if(!bar._alert) continue;
     const show = bar.isR ? redFlash : yelFlash;
@@ -4444,7 +4459,7 @@ function drawHdgTape(){
       h.globalAlpha = 1;
     }
   }
-  // Pass 4: White lines at edges of each solid (tier 1) airspace bar
+  // Pass 6: White lines at edges of each solid (tier 1) airspace bar
   for(const bar of hdgBarsAll){
     if(bar.tier !== 1) continue;
     h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
