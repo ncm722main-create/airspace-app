@@ -4371,83 +4371,80 @@ function drawHdgTape(){
     _cc.cand = cand;
   }
 
-  // ── Build unified bars per airspace: solid center + buffer sides as one unit ──
-  const cand = _cc.cand || [];
+  // ── Build unified bars from occluded airspaces (no bars behind other bars) ──
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
   const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
 
-  // Build one unified bar per candidate airspace (actual + buffer as one piece)
-  const uniBars = []; // {solidX, solidW, bufLoX, bufLoW, bufHiX, bufHiW, fullX, fullW, col, nearestNm, isR, isY}
-  for(const c of cand){
-    if(!c.atSameAlt) continue;
-    const effNm = Math.max(0, c.nearestNm - horizBufferNm);
+  // Use occluded airspaces (each degree already assigned to nearest airspace)
+  // For each tier-1 (solid) bar, attach buffer extensions on the sides
+  const uniBars = [];
+  for(const a of _cc.airspaces){
+    if(a.tier !== 1) continue; // only actual airspace bars, not standalone buffers
+    const effNm = Math.max(0, a.nearestNm - horizBufferNm);
     const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
     const isR = (effNm <= warnRedNm || secTo <= warnRedSec);
     const isY = !isR && (effNm <= warnYelNm || secTo <= warnYelSec);
     const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
     if(!isR && !isY && !isW) continue;
 
-    for(const iv of c.intervals){
-      for(const shift of [-360, 0, 360]){
-        const solidLo = iv.lo - hdg + shift;
-        const solidHi = iv.hi - hdg + shift;
-        if(solidHi < -65 || solidLo > 65) continue;
+    // Buffer expansion angle
+    const expandDeg = (a.nearestNm > 0.01 && horizBufferNm > 0)
+      ? Math.min(15, Math.atan(horizBufferNm / a.nearestNm) * 180 / Math.PI) : 0;
 
-        const sx1 = cx + solidLo * PX_PER_DEG;
-        const sx2 = cx + solidHi * PX_PER_DEG;
-        const solidX = sx1 - 0.5;
-        const solidW = Math.max(sx2 - sx1, 2) + 1;
+    // Escape direction from airspace center
+    const barMidBrg = ((a.lo + a.hi) / 2) % 360;
+    let diffC = barMidBrg - a.centerBrg;
+    if(diffC > 180) diffC -= 360; if(diffC < -180) diffC += 360;
 
-        // Buffer expansion
-        const expandDeg = (c.nearestNm > 0.01 && horizBufferNm > 0)
-          ? Math.atan(horizBufferNm / c.nearestNm) * 180 / Math.PI : 0;
-        const bufLoLo = solidLo - expandDeg;
-        const bufHiHi = solidHi + expandDeg;
+    for(const shift of [-360, 0, 360]){
+      const solidLo = a.lo - hdg + shift;
+      const solidHi = a.hi - hdg + shift;
+      if(solidHi < -65 || solidLo > 65) continue;
 
-        // Left buffer (lower bearing side)
-        const bx1L = cx + bufLoLo * PX_PER_DEG - 0.5;
-        const bufLoW = Math.max(0, solidX - bx1L);
-        // Right buffer (higher bearing side)
-        const bx1R = solidX + solidW;
-        const bx2R = cx + bufHiHi * PX_PER_DEG + 0.5;
-        const bufHiW = Math.max(0, bx2R - bx1R);
+      const sx1 = cx + solidLo * PX_PER_DEG;
+      const sx2 = cx + solidHi * PX_PER_DEG;
+      const solidX = sx1 - 0.5;
+      const solidW = Math.max(sx2 - sx1, 2) + 1;
 
-        const fullX = bx1L;
-        const fullW = bx2R - bx1L;
+      // Buffer extends outward from solid edges (only where no other airspace claims those degrees)
+      const bufLoLo = solidLo - expandDeg;
+      const bufHiHi = solidHi + expandDeg;
+      const bx1L = cx + bufLoLo * PX_PER_DEG - 0.5;
+      const bufLoW = Math.max(0, solidX - bx1L);
+      const bx1R = solidX + solidW;
+      const bx2R = cx + bufHiHi * PX_PER_DEG + 0.5;
+      const bufHiW = Math.max(0, bx2R - bx1R);
+      const fullX = bx1L;
+      const fullW = bx2R - bx1L;
 
-        uniBars.push({solidX, solidW, bufLoX: bx1L, bufLoW, bufHiX: bx1R, bufHiW, fullX, fullW,
-          col: c.col, nearestNm: c.nearestNm, isR, isY, _alert: isR || isY});
-      }
+      uniBars.push({solidX, solidW, bufLoX:bx1L, bufLoW, bufHiX:bx1R, bufHiW, fullX, fullW,
+        col:a.col, nearestNm:a.nearestNm, isR, isY, _alert:isR||isY});
     }
   }
 
-  // ── Draw: farthest first, closest on top. Alerts on top of non-alerts. ──
+  // ── Draw: non-alert first, alert on top. Within each, farthest first closest on top. ──
   const uniBase = uniBars.filter(b => !b._alert).sort((a,b) => b.nearestNm - a.nearestNm);
   const uniAlert = uniBars.filter(b => b._alert).sort((a,b) => b.nearestNm - a.nearestNm);
 
   for(const bars of [uniBase, uniAlert]){
     for(const bar of bars){
-      // Left buffer (chevrons pointing left, away from airspace)
       if(bar.bufLoW > 1){
         hatchFillRect(h, bar.bufLoX, barY, bar.bufLoW, barH, bar.col, 0.45, 'left');
         h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
         h.beginPath(); h.moveTo(bar.bufLoX, barY); h.lineTo(bar.bufLoX, barY+barH); h.stroke();
         h.globalAlpha=1;
       }
-      // Solid center
       h.fillStyle = bar.col; h.globalAlpha = 0.50;
       h.fillRect(bar.solidX, barY, bar.solidW, barH);
       h.globalAlpha = 1;
-      // Right buffer (chevrons pointing right, away from airspace)
       if(bar.bufHiW > 1){
         hatchFillRect(h, bar.bufHiX, barY, bar.bufHiW, barH, bar.col, 0.45, 'right');
         h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
         h.beginPath(); h.moveTo(bar.bufHiX+bar.bufHiW, barY); h.lineTo(bar.bufHiX+bar.bufHiW, barY+barH); h.stroke();
         h.globalAlpha=1;
       }
-      // White edge at outer ends of full bar
       h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
       h.beginPath(); h.moveTo(bar.fullX, barY); h.lineTo(bar.fullX, barY+barH); h.stroke();
       h.beginPath(); h.moveTo(bar.fullX+bar.fullW, barY); h.lineTo(bar.fullX+bar.fullW, barY+barH); h.stroke();
@@ -4455,7 +4452,7 @@ function drawHdgTape(){
     }
   }
 
-  // Flashing alert overlays on top of everything (spans full bar including buffer)
+  // Flashing alert overlays on top of everything
   for(const bar of uniAlert){
     const show = bar.isR ? redFlash : yelFlash;
     if(show){
