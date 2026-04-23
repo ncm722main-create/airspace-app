@@ -3594,57 +3594,56 @@ function drawAltTape(){
   const _altNow = Date.now();
   const _altPosDelta = Math.abs(ac.lat - _altC.lastLat) + Math.abs(ac.lon - _altC.lastLon);
   const _altHdgDelta = Math.abs(ac.hdg - _altC.lastHdg);
-  const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
+  const _altEmpty = _altC.hits.length === 0 && _nearbyAS.length > 0;
+  const _altStale = _altEmpty || (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
   if(_altStale){
     _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastHdg=ac.hdg; _altC.lastT=_altNow;
     const hitSet = new Set();
-    const hitMeta = {}; // idx → {nearestNm}
-    // Include airspaces we're currently inside (on the heading line by definition)
-    for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
-      const as = AIRSPACE_DATA[_i];
+    const hitMeta = {}; // idx → {nearestNm, src}
+
+    // ── Priority 1: Airspaces directly above/below (horizontally inside, closest vertically) ──
+    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
+      const as = _nearbyAS[_ni];
+      const _i = as._idx;
       if(!asClassVisible[as.c]) continue;
       if(as.c === 'E') continue;
-      if(pointInPolyAC(_i, as)){
-        hitSet.add(_i);
-        hitMeta[_i] = {nearestNm: 0};
-        continue;
-      }
+      if(!pointInPolyAC(_i, as)) continue; // must be horizontally inside
+      hitSet.add(_i);
+      hitMeta[_i] = {nearestNm: 0, src: 'vertical'};
     }
-    // Forward probe along exact heading line
+
+    // ── Priority 2: Airspaces ahead at same altitude on heading ──
     for(let nm = 0.5; nm <= _altProbeMax; nm += 0.5){
       const dd = (nm * 1852) / 111320;
       const pLat = ac.lat + _altCosH * dd;
       const pLon = ac.lon + _altSinH * dd / _altCosLat;
-      for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
+      for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
+        const as = _nearbyAS[_ni];
+        const _i = as._idx;
         if(hitSet.has(_i)) continue;
-        const as = AIRSPACE_DATA[_i];
         if(!asClassVisible[as.c]) continue;
         if(as.c === 'E') continue;
         if(pointInPoly(pLat, pLon, as.p)){
           hitSet.add(_i);
-          hitMeta[_i] = {nearestNm: nm};
+          hitMeta[_i] = {nearestNm: nm, src: 'forward'};
         }
       }
     }
-    // Behind-aircraft filter: exclude airspaces entirely 0.1nm+ behind
+
+    // Build hits list — sort: vertical (above/below) first by closest vertical distance, then forward by distance
     const hits = [];
     for(const _i of hitSet){
-      const as = AIRSPACE_DATA[_i];
-      let maxFwd = -Infinity, minFwd = Infinity;
-      for(let vi = 0; vi < as.p.length; vi++){
-        const dN = (as.p[vi][0] - ac.lat) * 60;
-        const dE = (as.p[vi][1] - ac.lon) * 60 * _altCosLat;
-        const fwd = dN * _altCosH + dE * _altSinH;
-        if(fwd > maxFwd) maxFwd = fwd;
-        if(fwd < minFwd) minFwd = fwd;
-      }
-      if(maxFwd < 0) continue; // exclude anything behind aircraft
-      const fwdDist = Math.max(0, minFwd);
-      hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, fwdDist});
+      const as = _nearbyAS.find(a => a._idx === _i) || AIRSPACE_DATA[_i];
+      const vDist = Math.min(Math.abs(aft - as.b), Math.abs(aft - as.t));
+      hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, src: hitMeta[_i].src, vDist});
     }
-    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
-    hits.sort((a,b) => a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
-    _altC.hits = hits.slice(0, 3);
+    hits.sort((a,b) => {
+      // Vertical (above/below) first, then forward
+      if(a.src !== b.src) return a.src === 'vertical' ? -1 : 1;
+      // Within same source: closest first
+      return a.src === 'vertical' ? a.vDist - b.vDist : a.nearestNm - b.nearestNm;
+    });
+    _altC.hits = hits;
   }
 
   for(const hit of _altC.hits){
@@ -3666,8 +3665,19 @@ function drawAltTape(){
     const vDistToCeil  = Math.abs(aft - as.t);
     const vDist = Math.min(vDistToFloor, vDistToCeil);
     const isInside = aft >= as.b && aft <= as.t;
-    const bandIsRed = !isInside && vDist <= warnVertFt;
-    const bandIsYellow = !bandIsRed && !isInside && vDist <= warnYelVertFt;
+    // Vertical alerts: airspace directly above/below
+    const vertRed = !isInside && vDist <= warnVertFt;
+    const vertYel = !vertRed && !isInside && vDist <= warnYelVertFt;
+    // Forward alerts: airspace ahead at same altitude
+    const _fwdNm = hit.nearestNm;
+    const _fwdSpd = simMode ? simSpeedKt : ac.speedKt;
+    const _effNm = Math.max(0, _fwdNm - horizBufferNm);
+    const _secTo = (_fwdSpd > 5) ? (_effNm / _fwdSpd) * 3600 : Infinity;
+    const fwdRed = isInside && false || (!isInside && hit.src === 'forward' && (_effNm <= warnRedNm || _secTo <= warnRedSec));
+    const fwdYel = !fwdRed && (!isInside && hit.src === 'forward' && (_effNm <= warnYelNm || _secTo <= warnYelSec));
+    // Alert if either vertical or forward threshold is met
+    const bandIsRed = vertRed || fwdRed;
+    const bandIsYellow = !bandIsRed && (vertYel || fwdYel);
     const pri = bandIsRed ? 2 : bandIsYellow ? 1 : 0;
 
     // Clamp actual region for drawing
