@@ -790,9 +790,9 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
   </div>
   <!-- ═══ LATERAL PROXIMITY ═══ -->
   <div class="sps">
-    <div class="sph" style="color:#ffcc00">Lateral Proximity</div>
+    <div class="sph">Lateral Proximity</div>
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Side clearance from airspace edge. Yellow caution when inside buffer zone.
+      Nearest edge distance to airspace boundary in any direction. Triggers chevron buffer alerts.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
       <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">BUFFER NM</label>
@@ -803,11 +803,11 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
         <input class="sinput" id="wWhiteSec" type="number" step="30" min="30" value="300" onchange="updateWarnThresholds()"></div>
     </div>
   </div>
-  <!-- ═══ LONGITUDINAL PROXIMITY ═══ -->
+  <!-- ═══ LONGITUDINAL (FORWARD) PROXIMITY ═══ -->
   <div class="sps">
-    <div class="sph" style="color:#ff4444">Longitudinal Proximity</div>
+    <div class="sph">Forward Proximity</div>
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Forward distance along heading. Red alert when heading directly at airspace.
+      Distance &amp; time along heading to airspace ahead. Triggers caution/alert on compass &amp; altitude tapes.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
       <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">CAUTION NM</label>
@@ -826,7 +826,7 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
   <div class="sps">
     <div class="sph">Vertical Proximity</div>
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Altitude separation from airspace floor/ceiling. Combined with longitudinal for alt tape red.
+      Distance from airspace floor or ceiling. Used with forward proximity for alt tape red alerts.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
       <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">CAUTION FT</label>
