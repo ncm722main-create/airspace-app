@@ -3686,19 +3686,19 @@ function drawAltTape(){
     const vDistToCeil  = Math.abs(aft - as.t);
     const vDist = Math.min(vDistToFloor, vDistToCeil);
     const isInside = aft >= as.b && aft <= as.t;
-    // Vertical alerts: airspace directly above/below
-    const vertRed = !isInside && vDist <= warnVertFt;
-    const vertYel = !vertRed && !isInside && vDist <= warnYelVertFt;
-    // Forward alerts: airspace ahead at same altitude
+    // Forward proximity check
     const _fwdNm = hit.nearestNm;
     const _fwdSpd = simMode ? simSpeedKt : ac.speedKt;
     const _effNm = Math.max(0, _fwdNm - horizBufferNm);
     const _secTo = (_fwdSpd > 5) ? (_effNm / _fwdSpd) * 3600 : Infinity;
-    const fwdRed = isInside && false || (!isInside && hit.src === 'forward' && (_effNm <= warnRedNm || _secTo <= warnRedSec));
-    const fwdYel = !fwdRed && (!isInside && hit.src === 'forward' && (_effNm <= warnYelNm || _secTo <= warnYelSec));
-    // Alert if either vertical or forward threshold is met
-    const bandIsRed = vertRed || fwdRed;
-    const bandIsYellow = !bandIsRed && (vertYel || fwdYel);
+    const fwdClose = !isInside && (_effNm <= warnRedNm || _secTo <= warnRedSec);
+    const fwdCaution = !isInside && (_effNm <= warnYelNm || _secTo <= warnYelSec);
+    // Vertical proximity check
+    const vertClose = !isInside && vDist <= warnVertFt;
+    // RED: both forward AND vertical proximity met
+    const bandIsRed = fwdClose && vertClose;
+    // YELLOW: forward proximity met (heading toward it)
+    const bandIsYellow = !bandIsRed && fwdCaution;
     const pri = bandIsRed ? 2 : bandIsYellow ? 1 : 0;
 
     // Clamp actual region for drawing
