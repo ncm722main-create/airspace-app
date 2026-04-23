@@ -4303,28 +4303,28 @@ function drawHdgTape(){
       }
       cand.push({as, col: asCol(as.c), intervals, bufIntervals, nearestNm, fwdDist: _cFwdDist, atSameAlt, centerBrg: _cbrg});
     }
-    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
-    cand.sort((a,b)=>a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
-    // Keep only top 3 closest airspaces
-    if(cand.length > 3) cand.length = 3;
+    // Sort by nearest distance — closest airspace wins each degree when abutting
+    cand.sort((a,b) => a.nearestNm - b.nearestNm);
 
-    // 2-pass degree scan — per-airspace priority:
-    // Pass 1 (solid): actual same-altitude airspace bearing → tier 1
-    // Pass 2 (hatched): any buffer (horiz buffer of same-alt OR buffer-altitude bearing) → tier 2
-    // Solid always overrides hatched at any degree.
+    // 2-pass degree scan — nearest airspace wins each degree (proper abutting support)
+    // Pass 1 (solid): actual same-altitude airspace — nearest wins
+    // Pass 2 (hatched): buffer zone — only unclaimed degrees
     const owner = new Array(360);
     const tier = new Uint8Array(360);
+    const ownerDist = new Float32Array(360).fill(Infinity);
 
-    // PASS 1: Actual same-altitude airspaces (solid) — highest priority
-    for(let b=0;b<360;b++){
-      for(const c of cand){
-        if(!c.atSameAlt) continue;
+    // PASS 1: Actual same-altitude airspaces — nearest to aircraft wins each degree
+    for(const c of cand){
+      if(!c.atSameAlt) continue;
+      for(let b=0;b<360;b++){
         let hit = false;
         for(const iv of c.intervals){
           if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ hit=true; break; } }
           else { if(b >= iv.lo || b <= iv.hi){ hit=true; break; } }
         }
-        if(hit){ owner[b] = c; tier[b] = 1; break; }
+        if(hit && c.nearestNm < ownerDist[b]){
+          owner[b] = c; tier[b] = 1; ownerDist[b] = c.nearestNm;
+        }
       }
     }
     // PASS 2: Horizontal buffer of same-alt airspaces — only unclaimed degrees within ±60° of heading
@@ -4446,6 +4446,21 @@ function drawHdgTape(){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
+  }
+
+  // White separator lines between different airspace owners (abutting delineation)
+  for(let i = 0; i < _cc.airspaces.length - 1; i++){
+    const a1 = _cc.airspaces[i], a2 = _cc.airspaces[i+1];
+    if(a1.owner === a2.owner) continue; // same airspace, no separator
+    // Draw white line at the boundary
+    for(const shift of [-360, 0, 360]){
+      const brgDeg = a2.lo - hdg + shift;
+      if(brgDeg < -65 || brgDeg > 65) continue;
+      const sx = cx + brgDeg * PX_PER_DEG;
+      h.strokeStyle = '#fff'; h.lineWidth = 1; h.globalAlpha = 0.7;
+      h.beginPath(); h.moveTo(sx, barY); h.lineTo(sx, barY + barH); h.stroke();
+      h.globalAlpha = 1;
+    }
   }
 
   // ── Tick marks and labels (every 10°) ──
