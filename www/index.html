@@ -6140,7 +6140,7 @@ function drawBirdsEye(){
       }
     }
 
-    // Collapse contiguous same-owner+tier segments into arcs
+    // Collapse contiguous same-owner+tier segments into arcs (1° gap between different owners)
     let cur = null;
     for(let b=0;b<=360;b++){
       const o = (b<360) ? owner[b] : null;
@@ -6156,7 +6156,8 @@ function drawBirdsEye(){
             isBuf: cur.tier === 2
           });
         }
-        cur = o ? {owner:o, lo:b, hi:b, tier:t} : null;
+        // Insert 1° gap when switching between different airspace owners
+        cur = o ? {owner:o, lo: (cur && o !== cur?.owner) ? b+1 : b, hi:b, tier:t} : null;
       }
     }
     if(cur){
@@ -6220,61 +6221,42 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── THREAT RING — delineated per-degree, nearest wins ─────────
-  // Each degree owned by ONE airspace (no overlaps).
-  // Actual airspace = class color at full band width.
-  // Buffer zone = class color at 50% opacity.
-  // Alert = yellow/red overlay on top.
-  // Heading wedge = bright highlight at nose.
+  // ── THREAT RING — clean delineated bars ───────────────────────
+  // Quiet when safe, lights up when threatened.
+  // Buffer = 50% opacity. Actual = dim when safe, bright when alert.
+  // 1° gaps between different airspaces for clean delineation.
 
-  const thickW = bandW;
+  const anyThreat = roseArcs.some(a => a.threat > 0);
 
-  // Draw arcs: buffer first (behind), then actual (on top)
-  const bufArcs = roseArcs.filter(a => a.isBuf);
-  const solidArcs = roseArcs.filter(a => !a.isBuf);
-
-  // Buffer arcs at 50% opacity
-  for(const arc of bufArcs){
-    const a1 = (arc.startDeg - 90) * D2R;
-    const a2 = (arc.endDeg - 90) * D2R;
-    g.beginPath();
-    g.arc(cx, cy, roseR - bandW/2, a1, a2);
-    g.strokeStyle = arc.col;
-    g.lineWidth = thickW;
-    g.globalAlpha = 0.5;
-    g.stroke();
-    g.globalAlpha = 1;
-  }
-
-  // Solid arcs at full opacity with class color
-  for(const arc of solidArcs){
-    const a1 = (arc.startDeg - 90) * D2R;
-    const a2 = (arc.endDeg - 90) * D2R;
-    g.beginPath();
-    g.arc(cx, cy, roseR - bandW/2, a1, a2);
-    g.strokeStyle = arc.col;
-    g.lineWidth = thickW;
-    g.globalAlpha = 0.7;
-    g.stroke();
-    g.globalAlpha = 1;
-  }
-
-  // Alert overlay (yellow/red) on threatened arcs
   for(const arc of roseArcs){
-    if(arc.threat === 0) continue;
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
-    const isRd = arc.threat === 2;
-    const show = alertFlashOn
-      ? (isRd ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
-    if(!show) continue;
+
+    // Base bar: class color
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
-    g.strokeStyle = isRd ? C.RED : C.YEL;
-    g.lineWidth = thickW;
-    g.globalAlpha = isRd ? 0.75 : 0.55;
+    g.strokeStyle = arc.col;
+    g.lineWidth = bandW;
+    // Buffer = 50%, actual = 20% when quiet / 45% when any threat exists nearby
+    g.globalAlpha = arc.isBuf ? 0.50 : (anyThreat ? 0.45 : 0.20);
     g.stroke();
     g.globalAlpha = 1;
+
+    // Alert overlay — this arc is specifically threatened
+    if(arc.threat > 0){
+      const isRd = arc.threat === 2;
+      const show = alertFlashOn
+        ? (isRd ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+      if(show){
+        g.beginPath();
+        g.arc(cx, cy, roseR - bandW/2, a1, a2);
+        g.strokeStyle = isRd ? C.RED : C.YEL;
+        g.lineWidth = bandW;
+        g.globalAlpha = isRd ? 0.80 : 0.60;
+        g.stroke();
+        g.globalAlpha = 1;
+      }
+    }
   }
 
   // Heading highlight — bright wedge at 0° (straight ahead)
@@ -6296,8 +6278,8 @@ function drawBirdsEye(){
       g.beginPath();
       g.arc(cx, cy, roseR - bandW/2, ha1, ha2);
       g.strokeStyle = hdgCol;
-      g.lineWidth = thickW + 2;
-      g.globalAlpha = hdgThreat > 0 ? 0.9 : 0.65;
+      g.lineWidth = bandW + 2;
+      g.globalAlpha = hdgThreat > 0 ? 0.95 : 0.65;
       g.stroke();
       g.globalAlpha = 1;
     }
