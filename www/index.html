@@ -4371,17 +4371,16 @@ function drawHdgTape(){
     _cc.cand = cand;
   }
 
-  // ── Build unified bars from occluded airspaces (no bars behind other bars) ──
+  // ── Draw occluded bars directly — solid (tier 1) and buffer (tier 2) ──
+  // Both are already clipped by the occlusion pass (no bars behind other bars)
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
   const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
 
-  // Use occluded airspaces (each degree already assigned to nearest airspace)
-  // For each tier-1 (solid) bar, attach buffer extensions on the sides
-  const uniBars = [];
+  // Build draw list from occluded bars
+  const hdgBarsAll = [];
   for(const a of _cc.airspaces){
-    if(a.tier !== 1) continue; // only actual airspace bars, not standalone buffers
     const effNm = Math.max(0, a.nearestNm - horizBufferNm);
     const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
     const isR = (effNm <= warnRedNm || secTo <= warnRedSec);
@@ -4389,84 +4388,77 @@ function drawHdgTape(){
     const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
     if(!isR && !isY && !isW) continue;
 
-    // Buffer expansion angle
-    const expandDeg = (a.nearestNm > 0.01 && horizBufferNm > 0)
-      ? Math.min(15, Math.atan(horizBufferNm / a.nearestNm) * 180 / Math.PI) : 0;
-
-    // Escape direction from airspace center
-    const barMidBrg = ((a.lo + a.hi) / 2) % 360;
-    let diffC = barMidBrg - a.centerBrg;
+    const escMid = ((a.lo + a.hi) / 2) % 360;
+    let diffC = escMid - a.centerBrg;
     if(diffC > 180) diffC -= 360; if(diffC < -180) diffC += 360;
+    const escDir = diffC >= 0 ? 'right' : 'left';
 
     for(const shift of [-360, 0, 360]){
-      const solidLo = a.lo - hdg + shift;
-      const solidHi = a.hi - hdg + shift;
-      if(solidHi < -65 || solidLo > 65) continue;
-
-      const sx1 = cx + solidLo * PX_PER_DEG;
-      const sx2 = cx + solidHi * PX_PER_DEG;
-      const solidX = sx1 - 0.5;
-      const solidW = Math.max(sx2 - sx1, 2) + 1;
-
-      // Buffer extends outward from solid edges (only where no other airspace claims those degrees)
-      const bufLoLo = solidLo - expandDeg;
-      const bufHiHi = solidHi + expandDeg;
-      const bx1L = cx + bufLoLo * PX_PER_DEG - 0.5;
-      const bufLoW = Math.max(0, solidX - bx1L);
-      const bx1R = solidX + solidW;
-      const bx2R = cx + bufHiHi * PX_PER_DEG + 0.5;
-      const bufHiW = Math.max(0, bx2R - bx1R);
-      const fullX = bx1L;
-      const fullW = bx2R - bx1L;
-
-      uniBars.push({solidX, solidW, bufLoX:bx1L, bufLoW, bufHiX:bx1R, bufHiW, fullX, fullW,
-        col:a.col, nearestNm:a.nearestNm, isR, isY, _alert:isR||isY});
+      const lo = a.lo - hdg + shift;
+      const hi = a.hi - hdg + shift;
+      if(hi < -65 || lo > 65) continue;
+      const x1 = cx + lo * PX_PER_DEG;
+      const x2 = cx + hi * PX_PER_DEG;
+      const bw = Math.max(x2 - x1, 2) + 1;
+      const bx = x1 - 0.5;
+      hdgBarsAll.push({x:bx, w:bw, col:a.col, tier:a.tier, nearestNm:a.nearestNm, isR, isY, _alert:isR||isY, escDir});
     }
   }
 
-  // ── Draw: non-alert first, alert on top. Within each, farthest first closest on top. ──
-  const uniBase = uniBars.filter(b => !b._alert).sort((a,b) => b.nearestNm - a.nearestNm);
-  const uniAlert = uniBars.filter(b => b._alert).sort((a,b) => b.nearestNm - a.nearestNm);
+  // Sort: buffers behind solids, non-alert behind alert, farthest behind closest
+  hdgBarsAll.sort((a,b) => {
+    if(a.tier !== b.tier) return a.tier === 2 ? -1 : 1; // buffer behind solid
+    if(a._alert !== b._alert) return a._alert ? 1 : -1; // alert on top
+    return b.nearestNm - a.nearestNm; // farthest behind
+  });
 
-  for(const bars of [uniBase, uniAlert]){
-    for(const bar of bars){
-      if(bar.bufLoW > 1){
-        hatchFillRect(h, bar.bufLoX, barY, bar.bufLoW, barH, bar.col, 0.45, 'left');
-        h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
-        h.beginPath(); h.moveTo(bar.bufLoX, barY); h.lineTo(bar.bufLoX, barY+barH); h.stroke();
-        h.globalAlpha=1;
-      }
-      h.fillStyle = bar.col; h.globalAlpha = 0.50;
-      h.fillRect(bar.solidX, barY, bar.solidW, barH);
-      h.globalAlpha = 1;
-      if(bar.bufHiW > 1){
-        hatchFillRect(h, bar.bufHiX, barY, bar.bufHiW, barH, bar.col, 0.45, 'right');
-        h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
-        h.beginPath(); h.moveTo(bar.bufHiX+bar.bufHiW, barY); h.lineTo(bar.bufHiX+bar.bufHiW, barY+barH); h.stroke();
-        h.globalAlpha=1;
-      }
+  for(const bar of hdgBarsAll){
+    if(bar.tier === 2){
+      // Buffer bar — hatched chevrons
+      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
       h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
-      h.beginPath(); h.moveTo(bar.fullX, barY); h.lineTo(bar.fullX, barY+barH); h.stroke();
-      h.beginPath(); h.moveTo(bar.fullX+bar.fullW, barY); h.lineTo(bar.fullX+bar.fullW, barY+barH); h.stroke();
+      h.beginPath(); h.moveTo(bar.x, barY); h.lineTo(bar.x, barY+barH); h.stroke();
+      h.beginPath(); h.moveTo(bar.x+bar.w, barY); h.lineTo(bar.x+bar.w, barY+barH); h.stroke();
       h.globalAlpha=1;
+    } else {
+      // Solid bar — class color
+      h.fillStyle = bar.col; h.globalAlpha = 0.50;
+      h.fillRect(bar.x, barY, bar.w, barH);
+      h.globalAlpha = 1;
     }
   }
 
   // Flashing alert overlays on top of everything
-  for(const bar of uniAlert){
+  for(const bar of hdgBarsAll){
+    if(!bar._alert) continue;
     const show = bar.isR ? redFlash : yelFlash;
     if(show){
       h.fillStyle = bar.isR ? C.RED : C.YEL;
       h.globalAlpha = bar.isR ? 0.70 : 0.60;
-      h.fillRect(bar.fullX, barY, bar.fullW, barH);
+      h.fillRect(bar.x, barY, bar.w, barH);
       h.globalAlpha = 1;
     }
   }
 
-  // Screen flash: alert bar crosses heading center
+  // White separator lines between different owners
+  for(let i = 0; i < _cc.airspaces.length - 1; i++){
+    const a1 = _cc.airspaces[i], a2 = _cc.airspaces[i+1];
+    if(a1.owner === a2.owner) continue;
+    for(const shift of [-360, 0, 360]){
+      const brgDeg = a2.lo - hdg + shift;
+      if(brgDeg < -65 || brgDeg > 65) continue;
+      const sx = cx + brgDeg * PX_PER_DEG;
+      h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
+      h.beginPath(); h.moveTo(sx, barY); h.lineTo(sx, barY+barH); h.stroke();
+      h.globalAlpha=1;
+    }
+  }
+
+  // Screen flash: any alert bar crosses heading center
   _screenFlashActive = false;
-  for(const bar of uniAlert){
-    if(bar.fullX <= cx && (bar.fullX + bar.fullW) >= cx){
+  for(const bar of hdgBarsAll){
+    if(!bar._alert) continue;
+    if(bar.x <= cx && (bar.x + bar.w) >= cx){
       _screenFlashActive = true;
       _screenFlashCol = bar.isR ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
     }
