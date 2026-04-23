@@ -788,17 +788,26 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
       Prevents screen dimming in flight
     </div>
   </div>
-  <!-- ═══ HORIZONTAL PROXIMITY ═══ -->
+  <!-- ═══ LATERAL PROXIMITY ═══ -->
   <div class="sps">
-    <div class="sph">Horizontal Proximity</div>
+    <div class="sph">Lateral Proximity</div>
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Forward distance &amp; time to airspace. First to trigger wins.
+      Nearest edge distance to airspace boundary in any direction. Triggers chevron buffer alerts.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
+      <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">BUFFER NM</label>
+        <input class="sinput" id="wHorizBuf" type="number" step="0.1" min="0" max="5" value="0.5" style="border-color:rgba(255,204,0,.4)" onchange="updateWarnThresholds()"></div>
       <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.85)">SHOW NM</label>
         <input class="sinput" id="wWhiteNm" type="number" step="0.5" min="1" value="5.0" onchange="updateWarnThresholds()"></div>
       <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.85)">SHOW SEC</label>
         <input class="sinput" id="wWhiteSec" type="number" step="30" min="30" value="300" onchange="updateWarnThresholds()"></div>
+    </div>
+  </div>
+  <!-- ═══ LONGITUDINAL (FORWARD) PROXIMITY ═══ -->
+  <div class="sps">
+    <div class="sph">Forward Proximity</div>
+    <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
+      Distance &amp; time along heading to airspace ahead. Triggers caution/alert on compass &amp; altitude tapes.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
       <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">CAUTION NM</label>
@@ -817,29 +826,22 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;
   <div class="sps">
     <div class="sph">Vertical Proximity</div>
     <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Distance from airspace floor or ceiling.
+      Distance from airspace floor or ceiling. Used with forward proximity for alt tape red alerts.
     </div>
     <div style="display:flex;gap:4px;margin:4px 0;">
       <div style="flex:1"><label style="font:8px var(--mono);color:#ffcc00">CAUTION FT</label>
         <input class="sinput" id="wYelVertFt" type="number" step="100" min="100" value="1000" style="border-color:rgba(255,204,0,.3)" onchange="updateWarnThresholds()"></div>
       <div style="flex:1"><label style="font:8px var(--mono);color:#ff4444">ALERT FT</label>
         <input class="sinput" id="wVertFt" type="number" step="100" min="100" value="500" style="border-color:rgba(255,51,51,.3)" onchange="updateWarnThresholds()"></div>
+      <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.6)">BUFFER FT</label>
+        <input class="sinput" id="wClearFt" type="number" step="100" min="0" max="2000" value="500" onchange="updateWarnThresholds()"></div>
     </div>
   </div>
-  <!-- ═══ CLEARANCE BUFFERS ═══ -->
+  <!-- ═══ RADAR ═══ -->
   <div class="sps">
-    <div class="sph">Clearance Buffers</div>
-    <div style="font-size:8px;color:var(--muted);font-family:var(--mono);line-height:1.5;margin-bottom:6px;">
-      Safety margins around airspace boundaries.
-    </div>
+    <div class="sph">Radar</div>
     <div style="display:flex;gap:4px;margin:4px 0;">
-      <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.6)">VERTICAL FT</label>
-        <input class="sinput" id="wClearFt" type="number" step="100" min="0" max="2000" value="500" onchange="updateWarnThresholds()"></div>
-      <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.6)">HORIZONTAL NM</label>
-        <input class="sinput" id="wHorizBuf" type="number" step="0.1" min="0" max="5" value="0.5" onchange="updateWarnThresholds()"></div>
-    </div>
-    <div style="display:flex;gap:4px;margin:4px 0;">
-      <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.6)">RADAR RANGE NM</label>
+      <div style="flex:1"><label style="font:8px var(--mono);color:rgba(255,255,255,.6)">RANGE NM</label>
         <input class="sinput" id="wRadarNm" type="number" step="1" min="5" max="30" value="15" onchange="updateWarnThresholds()"></div>
     </div>
   </div>
