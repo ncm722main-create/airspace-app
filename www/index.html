@@ -6083,10 +6083,10 @@ function drawBirdsEye(){
       _ivs.push({lo: _bMin, hi: _bMax});
     }
 
-    // Horizontal buffer expansion — expand intervals by buffer angle
+    // Horizontal buffer expansion — expand intervals by buffer angle (capped at 8°)
     const _bufIvs = [];
     if(horizBufferNm > 0 && _nearestNm > 0.01){
-      const bufExpand = Math.atan(horizBufferNm / _nearestNm) * (180/Math.PI);
+      const bufExpand = Math.min(8, Math.atan(horizBufferNm / _nearestNm) * (180/Math.PI));
       for(const iv of _ivs){
         let bLo = iv.lo - bufExpand;
         let bHi = iv.hi + bufExpand;
