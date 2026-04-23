@@ -4411,23 +4411,29 @@ function drawHdgTape(){
     return b.nearestNm - a.nearestNm; // farthest behind
   });
 
+  // Pass 1: Non-alert bars (buffer + solid)
   for(const bar of hdgBarsAll){
+    if(bar._alert) continue;
     if(bar.tier === 2){
-      // Buffer bar — hatched chevrons
       hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-      h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
-      h.beginPath(); h.moveTo(bar.x, barY); h.lineTo(bar.x, barY+barH); h.stroke();
-      h.beginPath(); h.moveTo(bar.x+bar.w, barY); h.lineTo(bar.x+bar.w, barY+barH); h.stroke();
-      h.globalAlpha=1;
     } else {
-      // Solid bar — class color
       h.fillStyle = bar.col; h.globalAlpha = 0.50;
       h.fillRect(bar.x, barY, bar.w, barH);
       h.globalAlpha = 1;
     }
   }
-
-  // Flashing alert overlays on top of everything
+  // Pass 2: Alert bars on top of non-alert (buffer + solid)
+  for(const bar of hdgBarsAll){
+    if(!bar._alert) continue;
+    if(bar.tier === 2){
+      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
+    } else {
+      h.fillStyle = bar.col; h.globalAlpha = 0.50;
+      h.fillRect(bar.x, barY, bar.w, barH);
+      h.globalAlpha = 1;
+    }
+  }
+  // Pass 3: Flashing red/yellow overlays on top of everything
   for(const bar of hdgBarsAll){
     if(!bar._alert) continue;
     const show = bar.isR ? redFlash : yelFlash;
@@ -4438,18 +4444,13 @@ function drawHdgTape(){
       h.globalAlpha = 1;
     }
   }
-
-  // White separator lines between different owners
-  for(let i = 0; i < _cc.airspaces.length - 1; i++){
-    const a1 = _cc.airspaces[i], a2 = _cc.airspaces[i+1];
-    if(a1.owner === a2.owner) continue;
-    for(const shift of [-360, 0, 360]){
-      const brgDeg = a2.lo - hdg + shift;
-      if(brgDeg < -65 || brgDeg > 65) continue;
-      const sx = cx + brgDeg * PX_PER_DEG;
-      h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
-      h.beginPath(); h.moveTo(sx, barY); h.lineTo(sx, barY+barH); h.stroke();
-      h.globalAlpha=1;
+  // Pass 4: White lines at edges of each solid (tier 1) airspace bar
+  for(const bar of hdgBarsAll){
+    if(bar.tier !== 1) continue;
+    h.strokeStyle='#fff'; h.lineWidth=1; h.globalAlpha=0.7;
+    h.beginPath(); h.moveTo(bar.x, barY); h.lineTo(bar.x, barY+barH); h.stroke();
+    h.beginPath(); h.moveTo(bar.x+bar.w, barY); h.lineTo(bar.x+bar.w, barY+barH); h.stroke();
+    h.globalAlpha=1;
     }
   }
 
