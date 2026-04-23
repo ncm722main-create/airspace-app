@@ -6092,7 +6092,9 @@ function drawBirdsEye(){
       else if(aft >= as.t) chevDir = 'up';
       else chevDir = altDiffFloor < altDiffCeil ? 'down' : 'up';
     }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir});
+    // Is aircraft inside this airspace's horizontal buffer zone?
+    const inHorizBuf = (_nearestNm <= horizBufferNm);
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir, inHorizBuf});
   }
 
   // Sort: farthest first → closest last (on top). Forward bars on top of side bars.
@@ -6106,15 +6108,21 @@ function drawBirdsEye(){
         startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
         col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
         nearestNm: c.nearestNm, fwdDist,
-        nearBuf: c.nearBuf, chevDir: c.chevDir
+        nearBuf: c.nearBuf, chevDir: c.chevDir, inHorizBuf: c.inHorizBuf
       });
     }
   }
-  // Draw order: side bars first, forward bars last (on top); farther before closer
+  // Draw order: buffer bars behind everything → side bars → forward bars on top
   roseArcs.sort((a,b) => {
+    // Layer 0: inside horizontal buffer → draw first (behind all)
+    const bufA = a.inHorizBuf ? 0 : 1;
+    const bufB = b.inHorizBuf ? 0 : 1;
+    if(bufA !== bufB) return bufA - bufB;
+    // Layer 1 vs 2: side bars before forward bars
     const fwdA = a.fwdDist <= 30 ? 1 : 0;
     const fwdB = b.fwdDist <= 30 ? 1 : 0;
     if(fwdA !== fwdB) return fwdA - fwdB;
+    // Within same layer: farther before closer
     return b.nearestNm - a.nearestNm;
   });
 
@@ -6175,12 +6183,12 @@ function drawBirdsEye(){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
 
-    // Base color arc
+    // Base color arc (buffer bars drawn dimmer)
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
     g.lineWidth = bandW;
-    g.globalAlpha = 0.5;
+    g.globalAlpha = arc.inHorizBuf ? 0.25 : 0.5;
     g.stroke();
     g.globalAlpha = 1;
 
