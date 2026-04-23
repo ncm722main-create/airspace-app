@@ -6611,7 +6611,8 @@ function drawHUD(){
   drawSpdTape();
   drawAltTape();
   if(!bevOn){ drawHdgTape(); } // compass tape at bottom
-  if(showVSI) drawHudVSbar();
+  // VSI tape: show in profile view or on mobile, hide on desktop main view
+  if(showVSI && (profileOn || HW < 600)) drawHudVSbar();
   // Mobile both/prof: fill only the tape-column portions of the TAPE_BOT_PAD area
   // (center area is left transparent — no shaded zone between the buttons)
   if(HW < 600 && profileOn && TAPE_BOT_PAD > 0){
