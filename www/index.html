@@ -4402,10 +4402,11 @@ function drawHdgTape(){
     }
   }
 
-  // Set screen flash from compass alerts
-  _screenFlashActive = hdgOverlays.length > 0;
+  // Set screen flash from forward alerts only (within ±30° of heading)
+  const _fwdAlerts = hdgOverlays.filter(b => b._fwd);
+  _screenFlashActive = _fwdAlerts.length > 0;
   if(_screenFlashActive){
-    const hasRed = hdgOverlays.some(b => b.col === C.RED);
+    const hasRed = _fwdAlerts.some(b => b.col === C.RED);
     _screenFlashCol = hasRed ? C.RED : C.YEL;
   }
 
