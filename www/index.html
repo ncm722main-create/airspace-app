@@ -4212,25 +4212,27 @@ function drawHdgTape(){
       const pri2=isRed2?2:isYel2?1:0;
       htCand.push({intervals:ivs2, col:asCol(as.c), isRed:isRed2, isYellow:isYel2, pri:pri2, nearestNm:near2});
     }
-    // Occlusion pass — nearest-first, each degree owned by nearest (same as compass rose)
+    // Occlusion pass — nearest-first, 0.5° resolution (same as compass rose)
     htCand.sort((a,b)=>a.nearestNm-b.nearestNm);
-    const htOwner=new Array(360);
-    for(let b=0;b<360;b++){
+    const STEPS=720;
+    const htOwner=new Array(STEPS);
+    for(let b=0;b<STEPS;b++){
+      const deg=b*0.5;
       for(const c of htCand){
         let hit=false;
-        for(const iv of c.intervals){ if(b>=iv.lo&&b<=iv.hi){hit=true;break;} }
+        for(const iv of c.intervals){ if(deg>=iv.lo&&deg<=iv.hi){hit=true;break;} }
         if(hit){htOwner[b]=c;break;}
       }
     }
     // Collapse into contiguous arcs
     const htArcs=[];
     let htCur=null;
-    for(let b=0;b<=360;b++){
-      const o=(b<360)?htOwner[b]:null;
-      if(o&&htCur&&o===htCur.owner){htCur.hi=b;}
+    for(let b=0;b<=STEPS;b++){
+      const o=(b<STEPS)?htOwner[b]:null;
+      if(o&&htCur&&o===htCur.owner){htCur.hi=b*0.5;}
       else{
         if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri});
-        htCur=o?{owner:o,lo:b,hi:b}:null;
+        htCur=o?{owner:o,lo:b*0.5,hi:b*0.5}:null;
       }
     }
     if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri});
@@ -4276,10 +4278,11 @@ function drawHdgTape(){
         }
       }
 
-      // White edge lines — wide enough to fill gap between adjacent bars
-      h.fillStyle = '#fff'; h.globalAlpha = 0.6;
-      h.fillRect(bx - 1, barY, 2, barH);
-      h.fillRect(bx + bw - 1, barY, 2, barH);
+      // Edge lines — colored by alert state (red/yellow/white)
+      const edgeCol = arc.isRed ? C.RED : arc.isYellow ? C.YEL : '#fff';
+      h.fillStyle = edgeCol; h.globalAlpha = 0.7;
+      h.fillRect(bx, barY, 1, barH);
+      h.fillRect(bx + bw - 1, barY, 1, barH);
       h.globalAlpha = 1;
     }
   }
@@ -5930,24 +5933,26 @@ function drawBirdsEye(){
     roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
-  // Occlusion pass — nearest-first 1° scan, merge contiguous same-owner sweeps.
+  // Occlusion pass — nearest-first 0.5° scan, merge contiguous same-owner sweeps.
   roseCand.sort((a,b)=>a.nearestNm - b.nearestNm);
   {
-    const owner = new Array(360);
-    for(let b=0;b<360;b++){
+    const STEPS = 720;
+    const owner = new Array(STEPS);
+    for(let b=0;b<STEPS;b++){
+      const deg = b * 0.5;
       for(const c of roseCand){
         let hit = false;
         for(const iv of c.intervals){
-          if(b >= iv.lo && b <= iv.hi){ hit = true; break; }
+          if(deg >= iv.lo && deg <= iv.hi){ hit = true; break; }
         }
         if(hit){ owner[b] = c; break; }
       }
     }
     let cur = null;
-    for(let b=0;b<=360;b++){
-      const o = (b<360) ? owner[b] : null;
+    for(let b=0;b<=STEPS;b++){
+      const o = (b<STEPS) ? owner[b] : null;
       if(o && cur && o === cur.owner){
-        cur.hi = b;
+        cur.hi = b * 0.5;
       } else {
         if(cur){
           roseArcs.push({
@@ -5957,7 +5962,7 @@ function drawBirdsEye(){
             isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
           });
         }
-        cur = o ? {owner:o, lo:b, hi:b} : null;
+        cur = o ? {owner:o, lo:b*0.5, hi:b*0.5} : null;
       }
     }
     if(cur){
@@ -6052,11 +6057,12 @@ function drawBirdsEye(){
     }
   }
 
-  // White separator lines at arc edges — wide enough to fill gaps
-  g.strokeStyle = '#fff';
-  g.lineWidth = 2;
-  g.globalAlpha = 0.6;
+  // Separator lines at arc edges — colored by alert state
   for(const arc of roseArcs){
+    const edgeCol = arc.isRed ? C.RED : arc.isYellow ? C.YEL : '#fff';
+    g.strokeStyle = edgeCol;
+    g.lineWidth = 1;
+    g.globalAlpha = 0.7;
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
     for(const ang of [a1, a2]){
