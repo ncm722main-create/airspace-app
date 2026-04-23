@@ -6054,9 +6054,10 @@ function drawBirdsEye(){
       }
     }
 
-    // Compass rose edge arc — all airspaces at same altitude, closest on top.
-    if(insideAs) continue; // skip bar if we're already inside it
-    if(!atAlt) continue;   // only show bars for airspaces at current altitude
+    // Compass rose edge arc — show at-altitude airspaces + any airspace directly ahead
+    if(insideAs) continue;
+    // Show bar if: at same altitude OR directly ahead (forward probe hit)
+    if(!atAlt && fwdNm === Infinity) continue;
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
@@ -6089,12 +6090,20 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
+    // Vertical buffer: chevrons for airspaces within ±500ft of aircraft
+    const altDiffFloor = Math.abs(aft - as.b);
+    const altDiffCeil  = Math.abs(aft - as.t);
+    const nearBuf = (altDiffFloor <= 500 || altDiffCeil <= 500);
+    let chevDir = null;
+    if(nearBuf){
+      if(aft <= as.b) chevDir = 'down';
+      else if(aft >= as.t) chevDir = 'up';
+      else chevDir = altDiffFloor < altDiffCeil ? 'down' : 'up';
+    }
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir});
   }
 
-  // Show ALL bars — no occlusion.
-  // Sort: farthest first, closest last (on top).
-  // Within same distance tier, bars near current heading draw on top of side bars.
+  // Sort: farthest first → closest last (on top). Forward bars on top of side bars.
   roseCand.sort((a,b)=>b.nearestNm - a.nearestNm);
   for(const c of roseCand){
     for(const iv of c.intervals){
@@ -6104,7 +6113,8 @@ function drawBirdsEye(){
       roseArcs.push({
         startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
         col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
-        nearestNm: c.nearestNm, fwdDist
+        nearestNm: c.nearestNm, fwdDist,
+        nearBuf: c.nearBuf, chevDir: c.chevDir
       });
     }
   }
@@ -6197,6 +6207,34 @@ function drawBirdsEye(){
       }
     }
 
+    // Chevrons for ±500ft vertical buffer — point toward clearance
+    if(arc.nearBuf && arc.chevDir){
+      const arcSpan = Math.abs(a2 - a1);
+      const chevCount = Math.max(1, Math.round(arcSpan / 0.25));
+      const chevR = roseR - bandW/2;
+      const chevSz = Math.min(bandW * 0.35, 5);
+      g.strokeStyle = '#fff';
+      g.lineWidth = 1.5;
+      g.globalAlpha = 0.9;
+      for(let ci = 0; ci < chevCount; ci++){
+        const t = chevCount === 1 ? 0.5 : ci / (chevCount - 1);
+        const ang = a1 + (a2 - a1) * t;
+        const px = cx + Math.cos(ang) * chevR;
+        const py = cy + Math.sin(ang) * chevR;
+        const radAng = Math.atan2(py - cy, px - cx);
+        const dir = arc.chevDir === 'up' ? 1 : -1;
+        const tipX = px + Math.cos(radAng) * chevSz * dir;
+        const tipY = py + Math.sin(radAng) * chevSz * dir;
+        const perpX = Math.cos(radAng + Math.PI/2) * chevSz * 0.6;
+        const perpY = Math.sin(radAng + Math.PI/2) * chevSz * 0.6;
+        g.beginPath();
+        g.moveTo(px - perpX - Math.cos(radAng)*chevSz*0.3*dir, py - perpY - Math.sin(radAng)*chevSz*0.3*dir);
+        g.lineTo(tipX, tipY);
+        g.lineTo(px + perpX - Math.cos(radAng)*chevSz*0.3*dir, py + perpY - Math.sin(radAng)*chevSz*0.3*dir);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+    }
   }
 
   // ── Compass rose ring border ──
