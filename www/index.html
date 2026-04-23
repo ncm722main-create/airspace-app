@@ -3326,16 +3326,15 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
   const d = dir || 'up';
   ctx.save();
   ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
-  // Solid class-color background
-  ctx.fillStyle = hatchCol;
-  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
+  // Tape-color background (same as tape bg)
+  ctx.fillStyle = C.TAPE;
+  ctx.globalAlpha = 1;
   ctx.fillRect(rx, ry, rw, rh);
-  // Cut out transparent chevrons using destination-out
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.strokeStyle = 'rgba(0,0,0,1)';
+  // Class-colored chevrons on top
+  ctx.strokeStyle = hatchCol;
   ctx.lineWidth = Math.max(2, Math.min(Math.max(rw, rh) * 0.1, 4));
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.globalAlpha = 0.7;
+  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
   const isVert = (d === 'up' || d === 'down');
   if(isVert){
     const aw = Math.min(rw * 0.7, 24); // full-width chevron
@@ -3375,7 +3374,6 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
       ctx.stroke();
     }
   }
-  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1; ctx.restore();
 }
 
