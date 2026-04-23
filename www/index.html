@@ -4402,11 +4402,15 @@ function drawHdgTape(){
     }
   }
 
-  // Set screen flash from forward alerts only (within ±30° of heading)
-  const _fwdAlerts = hdgOverlays.filter(b => b._fwd);
-  _screenFlashActive = _fwdAlerts.length > 0;
+  // Set screen flash only when heading is directly aimed at an alert (no deflection)
+  // Check hdgOverlays: an overlay's x position relative to center tells us if heading crosses it
+  const _hdgAlerts = hdgOverlays.filter(b => {
+    // Bar spans from b.x to b.x+b.w; heading indicator is at cx (center of tape)
+    return b.x <= cx && (b.x + b.w) >= cx;
+  });
+  _screenFlashActive = _hdgAlerts.length > 0;
   if(_screenFlashActive){
-    const hasRed = _fwdAlerts.some(b => b.col === C.RED);
+    const hasRed = _hdgAlerts.some(b => b.col === C.RED);
     _screenFlashCol = hasRed ? C.RED : C.YEL;
   }
 
@@ -5978,17 +5982,14 @@ function drawBirdsEye(){
     const col = asCol(as.c);
     const insideAs = pointInPolyAC(as._idx, as) && aft >= as.b && aft <= as.t;
     const atAlt = aft >= as.b && aft <= as.t;
-    // AUTO AIRSPACE behaviour (FLIPPED — default ON = at-alt only):
-    //   ON  (default) → show ONLY at-altitude airspaces; non-at-altitude hidden.
-    //   OFF           → show all airspaces; non-at-altitude rendered dimmed (2× transparency).
-    if(bevAirspaceShow && !atAlt) continue;
+    // AUTO AIRSPACE controls polygon visibility, but bars always show
+    const skipPoly = (bevAirspaceShow && !atAlt);
     const dimOther = (!bevAirspaceShow && !atAlt);
 
     // Forward probe (uses lookOffset to match all other views)
     let fwdNm = Infinity;
-    if(!insideAs && atAlt){
+    if(!insideAs){
       const fwdHdgR = (hdg + lookOffset) * D2R;
-      // Segment-bbox pre-check — skip airspace the look ray can't possibly hit
       if(segmentMaybeHits(as, ac.lat, ac.lon, fwdHdgR, 50, cosLat, 0.05)){
         for(let nm = 0.5; nm <= 50; nm += 1.0){
           const distDeg = (nm*1852)/111320;
@@ -6008,55 +6009,53 @@ function drawBirdsEye(){
     const isYellow = !isRed && fwdYel;
     const pri = isRed ? 2 : isYellow ? 1 : 0;
 
-    // Draw polygon (clipped to rose)
-    const pts = as.p.map(p => toScreen(p[0], p[1]));
-    g.beginPath();
-    pts.forEach((p, i) => i === 0 ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y));
-    g.closePath();
+    // Draw polygon (clipped to rose) — skip if AUTO AIRSPACE hides non-at-alt
+    if(!skipPoly){
+      const pts = as.p.map(p => toScreen(p[0], p[1]));
+      g.beginPath();
+      pts.forEach((p, i) => i === 0 ? g.moveTo(p.x, p.y) : g.lineTo(p.x, p.y));
+      g.closePath();
 
-    // Fill opacity — original values (not changed by AUTO AIRSPACE)
-    const dimMul = dimOther ? 0.5 : 1.0;
-    if(insideAs){
-      g.fillStyle = col; g.globalAlpha = 0.15 * dimMul; g.fill(); g.globalAlpha = 1;
-    } else if(isRed || isYellow){
-      const alertCol = isRed ? C.RED : C.YEL;
-      const show = alertFlashOn
-        ? (isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
-      if(show){ g.fillStyle = alertCol; g.globalAlpha = 0.25 * dimMul; g.fill(); g.globalAlpha = 1; }
-    } else if(atAlt){
-      g.fillStyle = col; g.globalAlpha = 0.08; g.fill(); g.globalAlpha = 1;
-    } else {
-      g.fillStyle = col; g.globalAlpha = 0.06 * dimMul; g.fill(); g.globalAlpha = 1;
-    }
-    // Stroke/outline — prominent lines when AUTO AIRSPACE is OFF (all airspaces visible)
-    g.strokeStyle = col;
-    if(!bevAirspaceShow){
-      // AUTO OFF: all airspaces shown with same style as at-alt
-      g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
-      g.globalAlpha = insideAs ? 0.9 : 0.80;
-    } else {
-      // AUTO ON: only at-alt shown; dimmed non-at-alt already filtered out
-      g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
-      g.globalAlpha = insideAs ? 0.9 : atAlt ? 0.80 : 0.35;
-    }
-    g.stroke(); g.globalAlpha = 1;
+      const dimMul = dimOther ? 0.5 : 1.0;
+      if(insideAs){
+        g.fillStyle = col; g.globalAlpha = 0.15 * dimMul; g.fill(); g.globalAlpha = 1;
+      } else if(isRed || isYellow){
+        const alertCol = isRed ? C.RED : C.YEL;
+        const show = alertFlashOn
+          ? (isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+        if(show){ g.fillStyle = alertCol; g.globalAlpha = 0.25 * dimMul; g.fill(); g.globalAlpha = 1; }
+      } else if(atAlt){
+        g.fillStyle = col; g.globalAlpha = 0.08; g.fill(); g.globalAlpha = 1;
+      } else {
+        g.fillStyle = col; g.globalAlpha = 0.06 * dimMul; g.fill(); g.globalAlpha = 1;
+      }
+      g.strokeStyle = col;
+      if(!bevAirspaceShow){
+        g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
+        g.globalAlpha = insideAs ? 0.9 : 0.80;
+      } else {
+        g.lineWidth = insideAs ? 2 : (isRed || isYellow) ? 1.5 : 0.8;
+        g.globalAlpha = insideAs ? 0.9 : atAlt ? 0.80 : 0.35;
+      }
+      g.stroke(); g.globalAlpha = 1;
 
-    // Class label
-    if(atAlt || insideAs){
-      let cLat = 0, cLon = 0;
-      for(const p of as.p){ cLat += p[0]; cLon += p[1]; }
-      cLat /= as.p.length; cLon /= as.p.length;
-      const cp = toScreen(cLat, cLon);
-      const dFromC = Math.sqrt((cp.x-cx)**2 + (cp.y-cy)**2);
-      if(dFromC < roseR - bandW){
-        g.font = "bold 10px 'Share Tech Mono',monospace";
-        g.fillStyle = col; g.globalAlpha = 0.7; g.textAlign = 'center';
-        g.fillText(as.c, cp.x, cp.y + 4); g.globalAlpha = 1;
+      // Class label
+      if(atAlt || insideAs){
+        let cLat = 0, cLon = 0;
+        for(const p of as.p){ cLat += p[0]; cLon += p[1]; }
+        cLat /= as.p.length; cLon /= as.p.length;
+        const cp = toScreen(cLat, cLon);
+        const dFromC = Math.sqrt((cp.x-cx)**2 + (cp.y-cy)**2);
+        if(dFromC < roseR - bandW){
+          g.font = "bold 10px 'Share Tech Mono',monospace";
+          g.fillStyle = col; g.globalAlpha = 0.7; g.textAlign = 'center';
+          g.fillText(as.c, cp.x, cp.y + 4); g.globalAlpha = 1;
+        }
       }
     }
 
-    // Compass rose edge arc — show ALL airspaces, closest on top.
-    if(insideAs) continue; // skip if we're already inside it
+    // Compass rose edge arc — ALL airspaces get bars, closest on top.
+    if(insideAs) continue; // skip bar if we're already inside it
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
@@ -6089,7 +6088,7 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, asFloor: as.b, asCeil: as.t});
   }
 
   // Show ALL bars — no occlusion.
@@ -6098,30 +6097,39 @@ function drawBirdsEye(){
   roseCand.sort((a,b)=>b.nearestNm - a.nearestNm);
   for(const c of roseCand){
     for(const iv of c.intervals){
-      // Compute how close this arc's center is to current heading (0°=straight ahead)
+      let relLo = iv.lo - hdg; while(relLo>180) relLo-=360; while(relLo<-180) relLo+=360;
+      let relHi = iv.hi - hdg; while(relHi>180) relHi-=360; while(relHi<-180) relHi+=360;
+      // Check if heading (0°) falls within this arc's bearing span
+      const arcCoversHdg = (relLo <= 0 && relHi >= 0) || (relLo >= 0 && relHi <= 0)
+        || Math.min(Math.abs(relLo), Math.abs(relHi)) < 2;
       let midBrg = ((iv.lo + iv.hi) / 2) - hdg;
-      while(midBrg > 180) midBrg -= 360;
-      while(midBrg < -180) midBrg += 360;
-      const fwdDist = Math.abs(midBrg); // 0=dead ahead, 180=behind
+      while(midBrg > 180) midBrg -= 360; while(midBrg < -180) midBrg += 360;
+      const fwdDist = Math.abs(midBrg);
+      // Chevron info: within ±500ft of aircraft altitude
+      const altDiffFloor = Math.abs(aft - c.asFloor);
+      const altDiffCeil  = Math.abs(aft - c.asCeil);
+      const nearBuf = (altDiffFloor <= 500 || altDiffCeil <= 500);
+      // Chevron direction: point toward clearance (away from airspace altitude)
+      // If closer to floor → go down (below floor); if closer to ceil → go up (above ceil)
+      let chevDir = null;
+      if(nearBuf){
+        if(aft <= c.asFloor) chevDir = 'down';       // below floor → keep descending
+        else if(aft >= c.asCeil) chevDir = 'up';      // above ceil → keep climbing
+        else chevDir = altDiffFloor < altDiffCeil ? 'down' : 'up'; // inside → nearest exit
+      }
       roseArcs.push({
-        startDeg: iv.lo - hdg,
-        endDeg:   iv.hi - hdg,
-        col: c.col,
-        isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
-        nearestNm: c.nearestNm,
-        fwdDist
+        startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
+        col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
+        nearestNm: c.nearestNm, fwdDist, arcCoversHdg, nearBuf, chevDir
       });
     }
   }
-  // Final draw order: side bars first, forward bars last (on top)
-  // Within same fwdDist group, farther distance first, closest last
+  // Draw order: side bars first, forward bars last (on top); farther before closer
   roseArcs.sort((a,b) => {
-    // Primary: bars off to the side draw first (behind)
-    // Secondary: farther bars draw first (behind)
-    const fwdA = a.fwdDist <= 30 ? 1 : 0; // forward = within ±30° of heading
+    const fwdA = a.fwdDist <= 30 ? 1 : 0;
     const fwdB = b.fwdDist <= 30 ? 1 : 0;
-    if(fwdA !== fwdB) return fwdA - fwdB; // side (0) before forward (1)
-    return b.nearestNm - a.nearestNm;      // farther before closer
+    if(fwdA !== fwdB) return fwdA - fwdB;
+    return b.nearestNm - a.nearestNm;
   });
 
   // ── Airport dots (inside rose) ──
@@ -6203,6 +6211,38 @@ function drawBirdsEye(){
         g.stroke();
         g.globalAlpha = 1;
       }
+    }
+
+    // Chevrons for altitude buffer (within ±500ft) — point toward clearance
+    if(arc.nearBuf && arc.chevDir){
+      const arcMid = (a1 + a2) / 2;
+      const arcSpan = Math.abs(a2 - a1);
+      // Place chevrons along the arc at intervals
+      const chevCount = Math.max(1, Math.round(arcSpan / 0.25));
+      const chevR = roseR - bandW/2;
+      const chevSz = Math.min(bandW * 0.35, 5);
+      g.strokeStyle = '#fff';
+      g.lineWidth = 1.5;
+      g.globalAlpha = 0.9;
+      for(let ci = 0; ci < chevCount; ci++){
+        const t = chevCount === 1 ? 0.5 : ci / (chevCount - 1);
+        const ang = a1 + (a2 - a1) * t;
+        const px = cx + Math.cos(ang) * chevR;
+        const py = cy + Math.sin(ang) * chevR;
+        // Chevron points radially: 'up' = outward (away from center), 'down' = inward
+        const radAng = Math.atan2(py - cy, px - cx);
+        const dir = arc.chevDir === 'up' ? 1 : -1; // outward or inward
+        const tipX = px + Math.cos(radAng) * chevSz * dir;
+        const tipY = py + Math.sin(radAng) * chevSz * dir;
+        const perpX = Math.cos(radAng + Math.PI/2) * chevSz * 0.6;
+        const perpY = Math.sin(radAng + Math.PI/2) * chevSz * 0.6;
+        g.beginPath();
+        g.moveTo(px - perpX - Math.cos(radAng)*chevSz*0.3*dir, py - perpY - Math.sin(radAng)*chevSz*0.3*dir);
+        g.lineTo(tipX, tipY);
+        g.lineTo(px + perpX - Math.cos(radAng)*chevSz*0.3*dir, py + perpY - Math.sin(radAng)*chevSz*0.3*dir);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
     }
   }
 
