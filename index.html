@@ -4419,31 +4419,20 @@ function drawHdgTape(){
     return b.nearestNm - a.nearestNm; // farthest behind
   });
 
-  // Pass 1: Non-alert solid bars (farthest first)
+  // Sort: non-alert behind alert, farthest behind closest
+  hdgBarsAll.sort((a,b) => (a._alert?1:0) - (b._alert?1:0) || b.nearestNm - a.nearestNm);
+
+  // Pass 1: All bars in order
   for(const bar of hdgBarsAll){
-    if(bar._alert || bar.tier === 2) continue;
-    h.fillStyle = bar.col; h.globalAlpha = 0.50;
-    h.fillRect(bar.x, barY, bar.w, barH);
-    h.globalAlpha = 1;
+    if(bar.tier === 2){
+      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
+    } else {
+      h.fillStyle = bar.col; h.globalAlpha = 0.50;
+      h.fillRect(bar.x, barY, bar.w, barH);
+      h.globalAlpha = 1;
+    }
   }
-  // Pass 2: Non-alert buffer chevrons
-  for(const bar of hdgBarsAll){
-    if(bar.tier !== 2 || bar._alert) continue;
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-  }
-  // Pass 3: Alert solid bars on top of all non-alert
-  for(const bar of hdgBarsAll){
-    if(!bar._alert || bar.tier === 2) continue;
-    h.fillStyle = bar.col; h.globalAlpha = 0.50;
-    h.fillRect(bar.x, barY, bar.w, barH);
-    h.globalAlpha = 1;
-  }
-  // Pass 4: Alert buffer chevrons on top of all other bars
-  for(const bar of hdgBarsAll){
-    if(bar.tier !== 2 || !bar._alert) continue;
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-  }
-  // Pass 5: Flashing red/yellow overlays on top of everything
+  // Pass 2: Flashing alert overlay on top
   for(const bar of hdgBarsAll){
     if(!bar._alert) continue;
     const show = bar.isR ? redFlash : yelFlash;
