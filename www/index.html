@@ -3594,7 +3594,9 @@ function drawAltTape(){
   const _altNow = Date.now();
   const _altPosDelta = Math.abs(ac.lat - _altC.lastLat) + Math.abs(ac.lon - _altC.lastLon);
   const _altHdgDelta = Math.abs(ac.hdg - _altC.lastHdg);
-  const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
+  // Force rebuild if cache has no hits but airspace data exists
+  const _altEmpty = _altC.hits.length === 0 && _nearbyAS.length > 0;
+  const _altStale = _altEmpty || (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
   if(_altStale){
     _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastHdg=ac.hdg; _altC.lastT=_altNow;
     // Only show airspaces on the forward heading line or that we're currently inside.
@@ -4172,7 +4174,8 @@ function drawHdgTape(){
   if(!drawHdgTape._cache) drawHdgTape._cache = {arcs:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
   const _cc = drawHdgTape._cache;
   const _cNow = Date.now();
-  const _stale = (_cNow - _cc.lastT) > 1500 || Math.abs(ac.lat-_cc.lastLat)+Math.abs(ac.lon-_cc.lastLon) > 0.002
+  const _ccEmpty = _cc.arcs.length === 0 && _nearbyAS.length > 0;
+  const _stale = _ccEmpty || (_cNow - _cc.lastT) > 1500 || Math.abs(ac.lat-_cc.lastLat)+Math.abs(ac.lon-_cc.lastLon) > 0.002
     || Math.abs(aft-_cc.lastAft) > 50 || Math.abs(_hdgSpd-_cc.lastSpd) > 5 || Math.abs(hdg-_cc.lastHdg) > 2;
   if(_stale){
     _cc.lastLat=ac.lat; _cc.lastLon=ac.lon; _cc.lastAft=aft; _cc.lastSpd=_hdgSpd; _cc.lastHdg=hdg; _cc.lastT=_cNow;
