@@ -4426,19 +4426,25 @@ function drawHdgTape(){
   // Sort: non-alert behind alert, farthest behind closest
   hdgBarsAll.sort((a,b) => (a._alert?1:0) - (b._alert?1:0) || b.nearestNm - a.nearestNm);
 
-  // Pass 1: All bars in order — chevrons use alert color when in alert
+  // Pass 1: Non-alert bars
   for(const bar of hdgBarsAll){
+    if(bar._alert) continue;
     if(bar.tier === 2){
-      // Buffer chevrons: use alert color as background when in alert state
-      const chevCol = (bar._alert && (bar.isR || bar.isY)) ? (bar.isR ? C.RED : C.YEL) : bar.col;
-      hatchFillRect(h, bar.x, barY, bar.w, barH, chevCol, 0.55, bar.escDir);
+      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
     } else {
       h.fillStyle = bar.col; h.globalAlpha = 0.50;
       h.fillRect(bar.x, barY, bar.w, barH);
       h.globalAlpha = 1;
     }
   }
-  // Pass 2: Flashing alert overlay — solid bars only (chevrons keep their pattern visible)
+  // Pass 2: Alert solid bars on top of all non-alert
+  for(const bar of hdgBarsAll){
+    if(!bar._alert || bar.tier === 2) continue;
+    h.fillStyle = bar.col; h.globalAlpha = 0.50;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  // Pass 3: Flashing alert overlay on solid bars
   for(const bar of hdgBarsAll){
     if(!bar._alert || bar.tier === 2) continue;
     const show = bar.isR ? redFlash : yelFlash;
@@ -4448,6 +4454,12 @@ function drawHdgTape(){
       h.fillRect(bar.x, barY, bar.w, barH);
       h.globalAlpha = 1;
     }
+  }
+  // Pass 4: Alert buffer chevrons on top of everything
+  for(const bar of hdgBarsAll){
+    if(!bar._alert || bar.tier !== 2) continue;
+    const chevCol = (bar.isR || bar.isY) ? (bar.isR ? C.RED : C.YEL) : bar.col;
+    hatchFillRect(h, bar.x, barY, bar.w, barH, chevCol, 0.55, bar.escDir);
   }
   // White separator lines between different airspace owners only (not between solid and its own buffer)
   for(let i = 0; i < _cc.airspaces.length - 1; i++){
