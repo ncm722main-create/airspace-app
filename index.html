@@ -4414,32 +4414,24 @@ function drawHdgTape(){
     _screenFlashCol = hasRed ? C.RED : C.YEL;
   }
 
-  // ── Draw order: non-alert → side alerts → forward alerts (highest z) ──
-  // Layer 1: non-alert bars
-  for(const bar of hdgHatch){ if(bar._alert) continue;
+  // ── Draw order: side bars → forward bars (highest z, always on top) ──
+  // Layer 1: side bars (non-forward, any alert state)
+  for(const bar of hdgHatch){ if(bar._fwd) continue;
     h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
   }
-  for(const bar of hdgSolid){ if(bar._alert) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
-  }
-  // Layer 2: side alert bars (not forward)
-  for(const bar of hdgHatch){ if(!bar._alert || bar._fwd) continue;
-    h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
-  }
-  for(const bar of hdgSolid){ if(!bar._alert || bar._fwd) continue;
+  for(const bar of hdgSolid){ if(bar._fwd) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
   for(const bar of hdgOverlays){ if(bar._fwd) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
-  // Layer 3: forward alert bars — highest z, drawn last
-  for(const bar of hdgHatch){ if(!bar._alert || !bar._fwd) continue;
+  // Layer 2: forward bars — always on top of everything
+  for(const bar of hdgHatch){ if(!bar._fwd) continue;
     h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
   }
-  for(const bar of hdgSolid){ if(!bar._alert || !bar._fwd) continue;
+  for(const bar of hdgSolid){ if(!bar._fwd) continue;
     h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
   for(const bar of hdgOverlays){ if(!bar._fwd) continue;
