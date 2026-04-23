@@ -4167,275 +4167,135 @@ function drawHdgTape(){
   const hdgBars = []; // {x, w, col, isRed, isYellow, pri}
 
   // --- Compass: 3-tier priority system ---
-  // Tier 1 (solid): actual airspace at same altitude
-  // Tier 2 (hatched L/R): horizontal buffer of same-altitude airspace (only if no actual at that degree)
-  // Tier 3 (hatched L/R): buffer-altitude airspace (only if nothing else at that degree)
-  // Chevrons point left/right to indicate escape direction.
+  // ── Heading tape bars — same logic as compass rose ──────────
+  // Per-degree nearest-wins scan. Delineated. Buffer at 50%. No overlaps.
   const _hdgSpd = simMode ? simSpeedKt : ac.speedKt;
-  if(!drawHdgTape._cache) drawHdgTape._cache = {airspaces:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
+  if(!drawHdgTape._cache) drawHdgTape._cache = {bars:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
   const _cc = drawHdgTape._cache;
   const _cNow = Date.now();
-  const _posDelta = Math.abs(ac.lat - _cc.lastLat) + Math.abs(ac.lon - _cc.lastLon);
-  const _altDelta = Math.abs(aft - _cc.lastAft);
-  const _spdDelta = Math.abs(_hdgSpd - _cc.lastSpd);
-  const _hdgDelta = Math.abs(hdg - _cc.lastHdg);
-  const _stale = (_cNow - _cc.lastT) > 1500 || _posDelta > 0.002 || _altDelta > 50 || _spdDelta > 5 || _hdgDelta > 2;
+  const _stale = (_cNow - _cc.lastT) > 1500 || Math.abs(ac.lat-_cc.lastLat)+Math.abs(ac.lon-_cc.lastLon) > 0.002
+    || Math.abs(aft-_cc.lastAft) > 50 || Math.abs(_hdgSpd-_cc.lastSpd) > 5 || Math.abs(hdg-_cc.lastHdg) > 2;
   if(_stale){
     _cc.lastLat=ac.lat; _cc.lastLon=ac.lon; _cc.lastAft=aft; _cc.lastSpd=_hdgSpd; _cc.lastHdg=hdg; _cc.lastT=_cNow;
-    const MAX_NM = Math.max(10, (_hdgSpd > 5) ? (_hdgSpd * 5 / 60) : 10);
-    // Build candidates — same altitude + buffer altitude
-    // Per-airspace logic: actual same-alt → solid; any buffer → hatched
-    const cand = [];
-    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
+    // Build candidates (same logic as compass rose)
+    const htCand = [];
+    for(let _ni=0; _ni<_nearbyAS.length; _ni++){
       const as = _nearbyAS[_ni];
-      const ai = as._idx;
       if(!asClassVisible[as.c]) continue;
-      // Only show airspaces at current altitude — compass guides horizontal escape
-      if(aft < as.b || aft > as.t) continue;
-      const atSameAlt = true;
-      if(pointInPolyAC(ai, as)) continue; // inside — skip
-      // Skip airspaces entirely behind the aircraft
-      const _cHdgR = hdg * D2R;
-      const _cCosH = Math.cos(_cHdgR), _cSinH = Math.sin(_cHdgR);
-      let _cMaxFwd = -Infinity, _cMinFwd = Infinity;
-      for(let vi=0;vi<as.p.length;vi++){
-        const dN = (as.p[vi][0] - ac.lat) * 60;
-        const dE = (as.p[vi][1] - ac.lon) * 60 * cosLat;
-        const fwd = dN * _cCosH + dE * _cSinH;
-        if(fwd > _cMaxFwd) _cMaxFwd = fwd;
-        if(fwd < _cMinFwd) _cMinFwd = fwd;
+      const atAlt2 = aft >= as.b && aft <= as.t;
+      const inside2 = pointInPolyAC(as._idx, as) && atAlt2;
+      if(inside2) continue;
+      if(!atAlt2) continue; // heading tape only shows at-altitude
+      // Compute bearings + nearest distance
+      const brgs2 = [];
+      let near2 = Infinity;
+      for(const p of as.p){
+        const dLat2 = (p[0]-ac.lat)*60, dLon2 = (p[1]-ac.lon)*60*cosLat;
+        const nm2 = Math.sqrt(dLat2*dLat2+dLon2*dLon2);
+        if(nm2<near2) near2=nm2;
+        let brg2 = Math.atan2((p[1]-ac.lon)*cosLat, p[0]-ac.lat)*180/Math.PI;
+        if(brg2<0) brg2+=360;
+        brgs2.push(brg2);
       }
-      if(_cMaxFwd < 0) continue; // exclude anything behind aircraft
-      const _cFwdDist = Math.max(0, _cMinFwd); // how far ahead nearest edge is
-      const bearings = [];
-      let nearestNm = Infinity;
-      const np = as.p.length;
-      for(let vi=0;vi<np;vi++){
-        const vLat = as.p[vi][0], vLon = as.p[vi][1];
-        const dLatNmV = (vLat-ac.lat)*60;
-        const dLonNmV = (vLon-ac.lon)*60*cosLat;
-        const vNm = Math.sqrt(dLatNmV*dLatNmV + dLonNmV*dLonNmV);
-        if(vNm < nearestNm) nearestNm = vNm;
-        const dLat = vLat-ac.lat, dLon = (vLon-ac.lon)*cosLat;
-        let brg = Math.atan2(dLon, dLat) * 180/Math.PI;
-        if(brg<0) brg+=360;
-        bearings.push(brg);
-        const j = (vi+1) % np;
-        const ax = dLonNmV, ay = dLatNmV;
-        const bx = (as.p[j][1]-ac.lon)*60*cosLat;
-        const by = (as.p[j][0]-ac.lat)*60;
-        const ex = bx-ax, ey = by-ay;
-        const len2 = ex*ex + ey*ey;
-        let t = len2 > 1e-9 ? -(ax*ex + ay*ey)/len2 : 0;
-        if(t < 0) t = 0; else if(t > 1) t = 1;
-        const px = ax + t*ex, py = ay + t*ey;
-        const eNm = Math.sqrt(px*px + py*py);
-        if(eNm < nearestNm) nearestNm = eNm;
+      if(!brgs2.length) continue;
+      const sorted2 = brgs2.slice().sort((a,b)=>a-b);
+      const bMin2=sorted2[0], bMax2=sorted2[sorted2.length-1];
+      const ivs2=[];
+      if(bMax2-bMin2>180){
+        let gs2=bMax2, ge2=bMin2+360, gsz2=ge2-gs2;
+        for(let i=0;i<sorted2.length-1;i++){const g3=sorted2[i+1]-sorted2[i];if(g3>gsz2){gsz2=g3;gs2=sorted2[i];ge2=sorted2[i+1];}}
+        if(ge2>gs2&&ge2<=360){ivs2.push({lo:ge2,hi:360});ivs2.push({lo:0,hi:gs2});}
+        else ivs2.push({lo:ge2,hi:gs2});
+      } else { ivs2.push({lo:bMin2,hi:bMax2}); }
+      // Buffer intervals
+      const bufIvs2=[];
+      if(horizBufferNm>0 && near2>0.01){
+        const exp2=Math.min(8,Math.atan(horizBufferNm/near2)*180/Math.PI);
+        for(const iv of ivs2){let bl=iv.lo-exp2;if(bl<0)bl+=360;let bh=iv.hi+exp2;if(bh>360)bh-=360;bufIvs2.push({lo:bl,hi:bh});}
       }
-      if(nearestNm > MAX_NM) continue;
-      if(!bearings.length) continue;
-      const sorted = bearings.slice().sort((a,b)=>a-b);
-      const bMin = sorted[0], bMax = sorted[sorted.length-1];
-      const intervals = [];
-      if(bMax - bMin > 180){
-        let gapStart = bMax, gapEnd = bMin + 360, gapSize = gapEnd - gapStart;
-        for(let i=0;i<sorted.length-1;i++){
-          const g2 = sorted[i+1]-sorted[i];
-          if(g2>gapSize){ gapSize=g2; gapStart=sorted[i]; gapEnd=sorted[i+1]; }
-        }
-        if(gapEnd > gapStart){
-          intervals.push({lo:gapEnd, hi:360});
-          intervals.push({lo:0,      hi:gapStart});
-        } else {
-          intervals.push({lo:gapEnd, hi:gapStart});
-        }
-      } else {
-        intervals.push({lo:bMin, hi:bMax});
-      }
-      // Horizontal buffer-expanded intervals (only for same-altitude airspaces)
-      const bufIntervals = [];
-      if(atSameAlt && nearestNm > 0.01 && horizBufferNm > 0){
-        const expandDeg = Math.atan(horizBufferNm / nearestNm) * 180 / Math.PI;
-        for(const iv of intervals){
-          bufIntervals.push({
-            lo: ((iv.lo - expandDeg) % 360 + 360) % 360,
-            hi: ((iv.hi + expandDeg) % 360 + 360) % 360
-          });
-        }
-      }
-      // Compute center bearing of actual intervals for chevron direction
-      let _cbrg = 0;
-      if(intervals.length === 1){
-        _cbrg = (intervals[0].lo + intervals[0].hi) / 2;
-      } else if(intervals.length === 2){
-        const all = [];
-        for(const iv of intervals){ all.push(iv.lo); all.push(iv.hi); }
-        let sum = 0;
-        for(const a of all){ let d = a - all[0]; if(d < -180) d+=360; if(d>180) d-=360; sum+=d; }
-        _cbrg = ((all[0] + sum/all.length) % 360 + 360) % 360;
-      }
-      cand.push({as, col: asCol(as.c), intervals, bufIntervals, nearestNm, fwdDist: _cFwdDist, atSameAlt, centerBrg: _cbrg});
+      // Threat level
+      const effNm2=Math.max(0,near2-horizBufferNm);
+      const secTo2=(_hdgSpd>5)?(effNm2/_hdgSpd)*3600:Infinity;
+      const threat2=(effNm2<=warnRedNm||secTo2<=warnRedSec)?2:
+                    (effNm2<=warnYelNm||secTo2<=warnYelSec)?1:0;
+      htCand.push({intervals:ivs2, bufIntervals:bufIvs2, col:asCol(as.c), threat:threat2, nearestNm:near2});
     }
-    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
-    cand.sort((a,b)=>a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
-    // Keep only top 3 closest airspaces
-    if(cand.length > 3) cand.length = 3;
-
-    // 2-pass degree scan — per-airspace priority:
-    // Pass 1 (solid): actual same-altitude airspace bearing → tier 1
-    // Pass 2 (hatched): any buffer (horiz buffer of same-alt OR buffer-altitude bearing) → tier 2
-    // Solid always overrides hatched at any degree.
-    const owner = new Array(360);
-    const tier = new Uint8Array(360);
-
-    // PASS 1: Actual same-altitude airspaces (solid) — highest priority
-    for(let b=0;b<360;b++){
-      for(const c of cand){
-        if(!c.atSameAlt) continue;
-        let hit = false;
-        for(const iv of c.intervals){
-          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ hit=true; break; } }
-          else { if(b >= iv.lo || b <= iv.hi){ hit=true; break; } }
-        }
-        if(hit){ owner[b] = c; tier[b] = 1; break; }
+    // Per-degree nearest-wins scan (same as compass rose)
+    const htOwner=new Array(360), htTier=new Uint8Array(360), htDist=new Float32Array(360).fill(Infinity);
+    for(const c of htCand){
+      for(let b=0;b<360;b++){
+        let hit=false;
+        for(const iv of c.intervals){if(iv.hi>=iv.lo){if(b>=iv.lo&&b<=iv.hi){hit=true;break;}}else{if(b>=iv.lo||b<=iv.hi){hit=true;break;}}}
+        if(hit&&c.nearestNm<htDist[b]){htOwner[b]=c;htTier[b]=1;htDist[b]=c.nearestNm;}
       }
     }
-    // PASS 2: Horizontal buffer of same-alt airspaces — only unclaimed degrees within ±60° of heading
-    for(let b=0;b<360;b++){
-      if(tier[b]) continue; // solid wins
-      let _brgOff = b - hdg; if(_brgOff > 180) _brgOff -= 360; if(_brgOff < -180) _brgOff += 360;
-      if(Math.abs(_brgOff) > 60) continue;
-      for(const c of cand){
-        if(!c.bufIntervals.length) continue;
-        let inBuf = false;
-        for(const iv of c.bufIntervals){
-          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inBuf=true; break; } }
-          else { if(b >= iv.lo || b <= iv.hi){ inBuf=true; break; } }
-        }
-        if(!inBuf) continue;
-        // Must NOT be in actual interval (those are solid in pass 1)
-        let inActual = false;
-        for(const iv of c.intervals){
-          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inActual=true; break; } }
-          else { if(b >= iv.lo || b <= iv.hi){ inActual=true; break; } }
-        }
-        if(inActual) continue;
-        owner[b] = c; tier[b] = 2; break;
+    for(const c of htCand){
+      if(!c.bufIntervals.length) continue;
+      for(let b=0;b<360;b++){
+        if(htTier[b]===1) continue;
+        let hit=false;
+        for(const iv of c.bufIntervals){if(iv.hi>=iv.lo){if(b>=iv.lo&&b<=iv.hi){hit=true;break;}}else{if(b>=iv.lo||b<=iv.hi){hit=true;break;}}}
+        if(hit){let inAct=false;for(const iv of c.intervals){if(iv.hi>=iv.lo){if(b>=iv.lo&&b<=iv.hi){inAct=true;break;}}else{if(b>=iv.lo||b<=iv.hi){inAct=true;break;}}}if(inAct)continue;}
+        if(hit&&c.nearestNm<htDist[b]){htOwner[b]=c;htTier[b]=2;htDist[b]=c.nearestNm;}
       }
     }
-
-    // Collapse into contiguous bars with tier info
-    const out = [];
-    let cur = null;
+    // Collapse with 1° gaps between different owners
+    const htBars=[];
+    let htCur=null;
     for(let b=0;b<=360;b++){
-      const o = (b<360) ? owner[b] : null;
-      const t = (b<360) ? tier[b] : 0;
-      if(o && cur && o === cur.owner && t === cur.tier){
-        cur.hi = b + 1;
-      } else {
-        if(cur) out.push(cur);
-        cur = o ? {owner:o, col:o.col, lo:b, hi:b+1, nearestNm:o.nearestNm, tier:t, centerBrg:o.centerBrg} : null;
+      const o=(b<360)?htOwner[b]:null;
+      const t=(b<360)?htTier[b]:0;
+      if(o&&htCur&&o===htCur.owner&&t===htCur.tier){htCur.hi=b;}
+      else{
+        if(htCur) htBars.push(htCur);
+        htCur=o?{owner:o,lo:(htCur&&o!==htCur?.owner)?b+1:b,hi:b,tier:t}:null;
       }
     }
-    if(cur) out.push(cur);
-    _cc.airspaces = out;
+    if(htCur) htBars.push(htCur);
+    _cc.bars = htBars;
   }
 
-  // Alert tiering & drawing
+  // Draw heading tape bars — matches compass rose appearance
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
-  const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
-  const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
-  const hdgSolid = [];
-  const hdgHatch = [];
-  const hdgOverlays = [];
-  for(const a of _cc.airspaces){
-    const effNm = Math.max(0, a.nearestNm - horizBufferNm);
-    const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
-    const isR = (effNm <= warnRedNm   || secTo <= warnRedSec);
-    const isY = !isR && (effNm <= warnYelNm   || secTo <= warnYelSec);
-    const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
-    if(!isR && !isY && !isW) continue;
-    // Escape direction for buffer bars: point away from the actual airspace center
-    // Bar center vs airspace center → if bar is clockwise from center, point right (away); else left
-    const barMidBrg = ((a.lo + a.hi) / 2) % 360;
-    let diffFromCenter = barMidBrg - a.centerBrg;
-    if(diffFromCenter > 180) diffFromCenter -= 360; if(diffFromCenter < -180) diffFromCenter += 360;
-    const escDir = (diffFromCenter >= 0) ? 'right' : 'left';
-    // Determine if this bar is in the forward arc (within ±30° of heading)
-    const barCenterBrg = ((a.lo + a.hi) / 2) % 360;
-    let _fwdOff = barCenterBrg - hdg; if(_fwdOff>180) _fwdOff-=360; if(_fwdOff<-180) _fwdOff+=360;
-    const _isFwd = Math.abs(_fwdOff) <= 30;
+  const anyHdgThreat = _cc.bars.some(b => b.owner.threat > 0);
+  _screenFlashActive = false;
 
+  for(const bar of _cc.bars){
     for(const shift of [-360, 0, 360]){
-      const lo = a.lo - hdg + shift;
-      const hi = a.hi - hdg + shift;
+      const lo = bar.lo - hdg + shift;
+      const hi = bar.hi - hdg + shift;
       if(hi < -65 || lo > 65) continue;
       const x1 = cx + lo * PX_PER_DEG;
       const x2 = cx + hi * PX_PER_DEG;
       const bw = Math.max(x2-x1, 2) + 1;
       const bx = x1 - 0.5;
-      const _isAlert = isR || isY;
-      if(a.tier === 1){
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, _alert:_isAlert, _fwd:_isFwd});
-      } else {
-        if(a.owner.atSameAlt){
-          const cRel = a.centerBrg - hdg + shift;
-          const centerX = cx + cRel * PX_PER_DEG;
-          let drawX, drawW;
-          if(escDir === 'right'){
-            drawX = Math.min(bx, centerX);
-            drawW = (bx + bw) - drawX;
-          } else {
-            drawX = bx;
-            drawW = Math.max(bx + bw, centerX) - bx;
-          }
-          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, _alert:_isAlert, _fwd:_isFwd});
-        }
-      }
-      if(_isAlert){
-        const show = isR ? redFlash : yelFlash;
+      const isBuf = bar.tier === 2;
+      const threat = bar.owner.threat;
+
+      // Base bar: class color
+      h.fillStyle = bar.owner.col;
+      h.globalAlpha = isBuf ? 0.50 : (anyHdgThreat ? 0.45 : 0.20);
+      h.fillRect(bx, barY, bw, barH);
+      h.globalAlpha = 1;
+
+      // Alert overlay
+      if(threat > 0){
+        const isRd = threat === 2;
+        const show = alertFlashOn ? (isRd ? Math.floor(nowF/250)%2===0 : Math.floor(nowF/500)%2===0) : true;
         if(show){
-          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60, _fwd:_isFwd});
+          h.fillStyle = isRd ? C.RED : C.YEL;
+          h.globalAlpha = isRd ? 0.80 : 0.60;
+          h.fillRect(bx, barY, bw, barH);
+          h.globalAlpha = 1;
+        }
+        // Screen flash: alert crosses heading center
+        if(bx <= cx && (bx + bw) >= cx){
+          _screenFlashActive = true;
+          _screenFlashCol = isRd ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
         }
       }
     }
-  }
-
-  // Set screen flash only when heading is directly aimed at an alert (no deflection)
-  // Check hdgOverlays: an overlay's x position relative to center tells us if heading crosses it
-  const _hdgAlerts = hdgOverlays.filter(b => {
-    // Bar spans from b.x to b.x+b.w; heading indicator is at cx (center of tape)
-    return b.x <= cx && (b.x + b.w) >= cx;
-  });
-  _screenFlashActive = _hdgAlerts.length > 0;
-  if(_screenFlashActive){
-    const hasRed = _hdgAlerts.some(b => b.col === C.RED);
-    _screenFlashCol = hasRed ? C.RED : C.YEL;
-  }
-
-  // ── Draw order: side bars → forward bars (highest z, always on top) ──
-  // Layer 1: side bars (non-forward, any alert state)
-  for(const bar of hdgHatch){ if(bar._fwd) continue;
-    h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
-  }
-  for(const bar of hdgSolid){ if(bar._fwd) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
-  }
-  for(const bar of hdgOverlays){ if(bar._fwd) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
-  }
-  // Layer 2: forward bars — always on top of everything
-  for(const bar of hdgHatch){ if(!bar._fwd) continue;
-    h.save(); h.beginPath(); h.rect(bar.clipX, barY, bar.clipW, barH); h.clip();
-    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir); h.restore();
-  }
-  for(const bar of hdgSolid){ if(!bar._fwd) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
-  }
-  for(const bar of hdgOverlays){ if(!bar._fwd) continue;
-    h.fillStyle = bar.col; h.globalAlpha = bar.a; h.fillRect(bar.x, barY, bar.w, barH); h.globalAlpha = 1;
   }
 
   // ── Tick marks and labels (every 10°) ──
