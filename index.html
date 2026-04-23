@@ -3682,11 +3682,12 @@ function drawAltTape(){
     const actClampTop = Math.max(topY, yActTop);
     const actClampBot = Math.min(botY, yActBot);
 
-    altBands.push({col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow, pri});
+    altBands.push({col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow, pri, nearestNm: hit.nearestNm});
   }
 
   // Sort by altitude position (lowest floor first) so bars render in order; within same altitude, alerts on top
-  altBands.sort((a,b) => a.yActBot - b.yActBot || a.pri - b.pri);
+  // Draw order: farthest first, closest on top (by nearest distance in any direction)
+  altBands.sort((a,b) => b.nearestNm - a.nearestNm);
 
   for(const band of altBands){
     const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
@@ -3903,11 +3904,11 @@ function drawAltTape(){
         const bufTopY = Math.max(scanTopY, cx - ((as.t + clearanceFt) - aft) * PX_PER_FT);
         const bufBotY = Math.min(scanBotY, cx - ((as.b - clearanceFt) - aft) * PX_PER_FT);
         if(bufTopY < bufBotY){
-          _fc.bands.push({actTopY, actBotY, bufTopY, bufBotY, col:bandCol, isRed, isYellow, pri, baseCol:asCol(as.c), horizBufOnly:hit.horizBufOnly});
+          _fc.bands.push({actTopY, actBotY, bufTopY, bufBotY, col:bandCol, isRed, isYellow, pri, baseCol:asCol(as.c), horizBufOnly:hit.horizBufOnly, fwdNm:hit.nm});
         }
       }
-      // Sort: white first, yellow second, red last (on top)
-      _fc.bands.sort((a,b) => a.pri - b.pri);
+      // Draw order: farthest first, closest on top
+      _fc.bands.sort((a,b) => b.fwdNm - a.fwdNm);
     }
 
     // Draw forward airspace bands — solid only if heading directly at airspace AND
@@ -4375,7 +4376,7 @@ function drawHdgTape(){
       const bx = x1 - 0.5;
       if(a.tier === 1){
         // Tier 1: actual same-altitude — solid fill
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50});
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, nearestNm:a.nearestNm});
       } else {
         // Tier 2: buffer — chevrons indicating horizontal escape direction
         if(a.owner.atSameAlt){
@@ -4391,7 +4392,7 @@ function drawHdgTape(){
             drawX = bx;
             drawW = Math.max(bx + bw, centerX) - bx;
           }
-          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir});
+          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir, nearestNm:a.nearestNm});
         }
       }
       if(isR || isY){
@@ -4403,7 +4404,10 @@ function drawHdgTape(){
     }
   }
 
-  // ── Draw: hatched first (clipped to buffer bounds), solid on top, then alert overlays ──
+  // ── Draw: farthest first, closest on top ──
+  hdgHatch.sort((a,b) => b.nearestNm - a.nearestNm);
+  hdgSolid.sort((a,b) => b.nearestNm - a.nearestNm);
+  // Hatched (buffer) behind solid, then alert overlays on top of everything
   for(const bar of hdgHatch){
     h.save();
     h.beginPath();
@@ -6076,7 +6080,8 @@ function drawBirdsEye(){
             startDeg: cur.lo - hdg,
             endDeg:   cur.hi - hdg,
             col: cur.owner.col,
-            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
+            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri,
+            nearestNm: cur.owner.nearestNm
           });
         }
         cur = o ? {owner:o, lo:b*0.5, hi:b*0.5} : null;
@@ -6143,8 +6148,8 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── Compass rose edge: alert arc bars ──
-  roseArcs.sort((a,b) => a.pri - b.pri);
+  // ── Compass rose edge: alert arc bars — closest on top ──
+  roseArcs.sort((a,b) => b.nearestNm - a.nearestNm);
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
