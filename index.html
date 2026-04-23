@@ -5999,12 +5999,17 @@ function drawBirdsEye(){
       }
     }
 
-    // Alert determination (forward-only, lateral probe removed)
-    const secTo = (spd > 5 && fwdNm < Infinity) ? (fwdNm / spd) * 3600 : Infinity;
-    const fwdRed = fwdNm <= warnRedNm || secTo <= warnRedSec;
-    const fwdYel = !fwdRed && (fwdNm <= warnYelNm || secTo <= warnYelSec);
-    const isRed = fwdRed;
-    const isYellow = !isRed && fwdYel;
+    // Alert determination — horizontal proximity (nearest edge in any direction)
+    let _nearestNmRose = Infinity;
+    for(const p of as.p){
+      const dLat3=(p[0]-ac.lat)*60, dLon3=(p[1]-ac.lon)*60*cosLat;
+      const nm3=Math.sqrt(dLat3*dLat3+dLon3*dLon3);
+      if(nm3<_nearestNmRose) _nearestNmRose=nm3;
+    }
+    const effNmRose = Math.max(0, _nearestNmRose - horizBufferNm);
+    const secToRose = (spd > 5) ? (effNmRose / spd) * 3600 : Infinity;
+    const isRed = !insideAs && atAlt && (effNmRose <= warnRedNm || secToRose <= warnRedSec);
+    const isYellow = !isRed && !insideAs && atAlt && (effNmRose <= warnYelNm || secToRose <= warnYelSec);
     const pri = isRed ? 2 : isYellow ? 1 : 0;
 
     // Draw polygon (clipped to rose) — skip if AUTO AIRSPACE hides non-at-alt
@@ -6190,7 +6195,7 @@ function drawBirdsEye(){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
 
-    // Base color arc
+    // Class color arc only — no alert overlay on bars (alerts flash on polygon)
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
@@ -6198,21 +6203,6 @@ function drawBirdsEye(){
     g.globalAlpha = 0.5;
     g.stroke();
     g.globalAlpha = 1;
-
-    // Alert overlay
-    if(arc.isRed || arc.isYellow){
-      const show = alertFlashOn
-        ? (arc.isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
-      if(show){
-        g.beginPath();
-        g.arc(cx, cy, roseR - bandW/2, a1, a2);
-        g.strokeStyle = arc.isRed ? C.RED : C.YEL;
-        g.lineWidth = bandW;
-        g.globalAlpha = 0.75;
-        g.stroke();
-        g.globalAlpha = 1;
-      }
-    }
   }
 
   // Separator lines at arc edges — colored by alert state
