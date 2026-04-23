@@ -6054,11 +6054,8 @@ function drawBirdsEye(){
       }
     }
 
-    // Compass rose edge arc — collect candidate bearing intervals. Final arcs
-    // are assembled after this loop with nearest-first occlusion so distant
-    // airspaces behind nearer ones don't show on the edge.
-    if(insideAs) continue;
-    if(!atAlt) continue;
+    // Compass rose edge arc — show ALL airspaces, closest on top.
+    if(insideAs) continue; // skip if we're already inside it
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
