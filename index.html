@@ -4436,6 +4436,11 @@ function drawHdgTape(){
     h.clip();
     hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
     h.restore();
+    // White lines at each end of buffer bar
+    h.strokeStyle = '#fff'; h.lineWidth = 1; h.globalAlpha = 0.7;
+    h.beginPath(); h.moveTo(bar.clipX, barY); h.lineTo(bar.clipX, barY + barH); h.stroke();
+    h.beginPath(); h.moveTo(bar.clipX + bar.clipW, barY); h.lineTo(bar.clipX + bar.clipW, barY + barH); h.stroke();
+    h.globalAlpha = 1;
   }
   for(const bar of hdgSolid){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
