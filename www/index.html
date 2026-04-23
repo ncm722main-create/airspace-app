@@ -4463,6 +4463,41 @@ function drawHdgTape(){
     }
   }
 
+  // Pass 3: Escape heading labels on alert bars within ±30° of heading
+  // Shows what heading to turn to clear the airspace (solid edge) and buffer (chevron edge)
+  h.font = "bold 9px 'Share Tech Mono',monospace";
+  h.textBaseline = 'bottom';
+  for(const a of _cc.airspaces){
+    const effNm = Math.max(0, a.nearestNm - horizBufferNm);
+    const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
+    const isAlert = (effNm <= warnRedNm || secTo <= warnRedSec) || (effNm <= warnYelNm || secTo <= warnYelSec);
+    if(!isAlert) continue;
+    for(const shift of [-360, 0, 360]){
+      const loRel = a.lo - hdg + shift;
+      const hiRel = a.hi - hdg + shift;
+      if(hiRel < -30 || loRel > 30) continue; // only within ±30° of heading
+      // Left edge escape heading
+      const leftX = cx + loRel * PX_PER_DEG;
+      const leftHdg = Math.round(normHdg(a.lo));
+      // Right edge escape heading
+      const rightX = cx + hiRel * PX_PER_DEG;
+      const rightHdg = Math.round(normHdg(a.hi));
+      const alertCol = a.tier === 1 ? '#fff' : 'rgba(255,255,255,.7)';
+      h.fillStyle = alertCol;
+      // Draw heading at left edge (turn left to clear)
+      if(loRel > -30 && loRel < 30){
+        h.textAlign = 'right';
+        h.fillText(String(leftHdg).padStart(3,'0')+'°', leftX - 2, barY - 2);
+      }
+      // Draw heading at right edge (turn right to clear)
+      if(hiRel > -30 && hiRel < 30){
+        h.textAlign = 'left';
+        h.fillText(String(rightHdg).padStart(3,'0')+'°', rightX + 2, barY - 2);
+      }
+    }
+  }
+  h.textBaseline = 'alphabetic';
+
   // Screen flash: any alert bar crosses heading center
   _screenFlashActive = false;
   for(const bar of hdgBarsAll){
