@@ -4426,19 +4426,21 @@ function drawHdgTape(){
   // Sort: non-alert behind alert, farthest behind closest
   hdgBarsAll.sort((a,b) => (a._alert?1:0) - (b._alert?1:0) || b.nearestNm - a.nearestNm);
 
-  // Pass 1: All bars in order
+  // Pass 1: All bars in order — chevrons use alert color when in alert
   for(const bar of hdgBarsAll){
     if(bar.tier === 2){
-      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
+      // Buffer chevrons: use alert color as background when in alert state
+      const chevCol = (bar._alert && (bar.isR || bar.isY)) ? (bar.isR ? C.RED : C.YEL) : bar.col;
+      hatchFillRect(h, bar.x, barY, bar.w, barH, chevCol, 0.55, bar.escDir);
     } else {
       h.fillStyle = bar.col; h.globalAlpha = 0.50;
       h.fillRect(bar.x, barY, bar.w, barH);
       h.globalAlpha = 1;
     }
   }
-  // Pass 2: Flashing alert overlay on top
+  // Pass 2: Flashing alert overlay — solid bars only (chevrons keep their pattern visible)
   for(const bar of hdgBarsAll){
-    if(!bar._alert) continue;
+    if(!bar._alert || bar.tier === 2) continue;
     const show = bar.isR ? redFlash : yelFlash;
     if(show){
       h.fillStyle = bar.isR ? C.RED : C.YEL;
