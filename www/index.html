@@ -5951,11 +5951,9 @@ function drawBirdsEye(){
       }
     }
 
-    // ── Compass rose threat ring — collect candidates ──
+    // Compass rose edge arc — collect candidates for the ring
     if(insideAs) continue;
-    if(!atAlt && fwdNm === Infinity) continue;
-
-    // Compute bearing span + buffer span
+    if(!atAlt) continue;
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
@@ -5963,7 +5961,9 @@ function drawBirdsEye(){
       const dLonNm = (p[1] - ac.lon) * 60 * cosLat;
       const nm = Math.sqrt(dLatNm*dLatNm + dLonNm*dLonNm);
       if(nm < _nearestNm) _nearestNm = nm;
-      let brg = Math.atan2((p[1] - ac.lon) * cosLat, p[0] - ac.lat) * (180/Math.PI);
+      const dLat = p[0] - ac.lat;
+      const dLon = (p[1] - ac.lon) * cosLat;
+      let brg = Math.atan2(dLon, dLat) * (180/Math.PI);
       if(brg < 0) brg += 360;
       _brgs.push(brg);
     }
@@ -5986,90 +5986,45 @@ function drawBirdsEye(){
     } else {
       _ivs.push({lo: _bMin, hi: _bMax});
     }
-    // Buffer intervals (expand by horizBufferNm angle, capped 8°)
-    const _bufIvs = [];
-    if(horizBufferNm > 0 && _nearestNm > 0.01){
-      const bufExp = Math.min(8, Math.atan(horizBufferNm/_nearestNm)*(180/Math.PI));
-      for(const iv of _ivs){
-        let bLo = iv.lo - bufExp; if(bLo<0) bLo+=360;
-        let bHi = iv.hi + bufExp; if(bHi>360) bHi-=360;
-        _bufIvs.push({lo:bLo, hi:bHi});
-      }
-    }
-    const threat = isRed ? 2 : isYellow ? 1 : 0;
-    roseCand.push({intervals:_ivs, bufIntervals:_bufIvs, col, threat, nearestNm:_nearestNm, cls:as.c});
+    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
-  // ── Per-degree scan: nearest airspace wins each degree, no overlaps ──
-  // Pass 1: actual airspace (solid)  Pass 2: buffer zone (50% opacity)
+  // Occlusion pass — nearest-first 1° scan, merge contiguous same-owner sweeps.
+  roseCand.sort((a,b)=>a.nearestNm - b.nearestNm);
   {
-    const owner = new Array(360);    // which candidate owns each degree
-    const ownerTier = new Array(360); // 1=actual, 2=buffer
-    const ownerDist = new Float32Array(360).fill(Infinity);
-
-    // Pass 1: actual airspace — nearest wins
-    for(const c of roseCand){
-      for(let b=0;b<360;b++){
+    const owner = new Array(360);
+    for(let b=0;b<360;b++){
+      for(const c of roseCand){
         let hit = false;
         for(const iv of c.intervals){
-          if(iv.hi >= iv.lo){ if(b>=iv.lo && b<=iv.hi){ hit=true; break; } }
-          else { if(b>=iv.lo || b<=iv.hi){ hit=true; break; } }
+          if(b >= iv.lo && b <= iv.hi){ hit = true; break; }
         }
-        if(hit && c.nearestNm < ownerDist[b]){
-          owner[b] = c; ownerTier[b] = 1; ownerDist[b] = c.nearestNm;
-        }
+        if(hit){ owner[b] = c; break; }
       }
     }
-    // Pass 2: buffer zone — only unclaimed degrees, nearest wins
-    for(const c of roseCand){
-      if(!c.bufIntervals.length) continue;
-      for(let b=0;b<360;b++){
-        if(ownerTier[b] === 1) continue; // actual wins over buffer
-        let hit = false;
-        for(const iv of c.bufIntervals){
-          if(iv.hi >= iv.lo){ if(b>=iv.lo && b<=iv.hi){ hit=true; break; } }
-          else { if(b>=iv.lo || b<=iv.hi){ hit=true; break; } }
-        }
-        // Skip if this degree is in the actual interval (those are tier 1)
-        if(hit){
-          let inActual = false;
-          for(const iv of c.intervals){
-            if(iv.hi >= iv.lo){ if(b>=iv.lo && b<=iv.hi){ inActual=true; break; } }
-            else { if(b>=iv.lo || b<=iv.hi){ inActual=true; break; } }
-          }
-          if(inActual) continue;
-        }
-        if(hit && c.nearestNm < ownerDist[b]){
-          owner[b] = c; ownerTier[b] = 2; ownerDist[b] = c.nearestNm;
-        }
-      }
-    }
-
-    // Collapse contiguous same-owner+tier segments into arcs
     let cur = null;
     for(let b=0;b<=360;b++){
       const o = (b<360) ? owner[b] : null;
-      const t = (b<360) ? ownerTier[b] : 0;
-      if(o && cur && o===cur.owner && t===cur.tier){
+      if(o && cur && o === cur.owner){
         cur.hi = b;
       } else {
         if(cur){
           roseArcs.push({
-            startDeg: cur.lo - hdg, endDeg: cur.hi - hdg,
-            col: cur.owner.col, threat: cur.owner.threat,
-            nearestNm: cur.owner.nearestNm, cls: cur.owner.cls,
-            isBuf: cur.tier === 2
+            startDeg: cur.lo - hdg,
+            endDeg:   cur.hi - hdg,
+            col: cur.owner.col,
+            isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
           });
         }
-        cur = o ? {owner:o, lo:b, hi:b, tier:t} : null;
+        cur = o ? {owner:o, lo:b, hi:b} : null;
       }
     }
     if(cur){
       roseArcs.push({
-        startDeg: cur.lo - hdg, endDeg: cur.hi - hdg,
-        col: cur.owner.col, threat: cur.owner.threat,
-        nearestNm: cur.owner.nearestNm, cls: cur.owner.cls,
-        isBuf: cur.tier === 2
+        startDeg: cur.lo - hdg,
+        endDeg:   cur.hi - hdg,
+        col: cur.owner.col,
+        isRed: cur.owner.isRed, isYellow: cur.owner.isYellow, pri: cur.owner.pri
       });
     }
   }
@@ -6125,67 +6080,34 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── THREAT RING — clean delineated bars ───────────────────────
-  // Quiet when safe, lights up when threatened.
-  // Buffer = 50% opacity. Actual = dim when safe, bright when alert.
-  // 1° gaps between different airspaces for clean delineation.
-
-  const anyThreat = roseArcs.some(a => a.threat > 0);
-
+  // ── Compass rose edge: alert arc bars ──
+  roseArcs.sort((a,b) => a.pri - b.pri);
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
 
-    // Base bar: class color
+    // Base color arc
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
     g.lineWidth = bandW;
-    // Buffer = 50%, actual = 20% when quiet / 45% when any threat exists nearby
-    g.globalAlpha = arc.isBuf ? 0.50 : (anyThreat ? 0.45 : 0.20);
+    g.globalAlpha = 0.5;
     g.stroke();
     g.globalAlpha = 1;
 
-    // Alert overlay — this arc is specifically threatened
-    if(arc.threat > 0){
-      const isRd = arc.threat === 2;
+    // Alert overlay
+    if(arc.isRed || arc.isYellow){
       const show = alertFlashOn
-        ? (isRd ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+        ? (arc.isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
       if(show){
         g.beginPath();
         g.arc(cx, cy, roseR - bandW/2, a1, a2);
-        g.strokeStyle = isRd ? C.RED : C.YEL;
+        g.strokeStyle = arc.isRed ? C.RED : C.YEL;
         g.lineWidth = bandW;
-        g.globalAlpha = isRd ? 0.80 : 0.60;
+        g.globalAlpha = 0.75;
         g.stroke();
         g.globalAlpha = 1;
       }
-    }
-  }
-
-  // Heading highlight — bright wedge at 0° (straight ahead)
-  {
-    const hdgHalfW = 4 * D2R;
-    const ha1 = -90 * D2R - hdgHalfW;
-    const ha2 = -90 * D2R + hdgHalfW;
-    let hdgThreat = 0, hdgCol = null;
-    for(const arc of roseArcs){
-      let lo = arc.startDeg, hi = arc.endDeg;
-      if(lo > hi){ const t2 = lo; lo = hi; hi = t2; }
-      const coversHdg = (lo <= 0 && hi >= 0) || Math.min(Math.abs(lo), Math.abs(hi)) < 5;
-      if(coversHdg){
-        if(arc.threat > hdgThreat){ hdgThreat = arc.threat; hdgCol = arc.threat===2 ? C.RED : arc.threat===1 ? C.YEL : arc.col; }
-        if(hdgThreat===0 && !hdgCol) hdgCol = arc.col;
-      }
-    }
-    if(hdgCol){
-      g.beginPath();
-      g.arc(cx, cy, roseR - bandW/2, ha1, ha2);
-      g.strokeStyle = hdgCol;
-      g.lineWidth = bandW + 2;
-      g.globalAlpha = hdgThreat > 0 ? 0.95 : 0.65;
-      g.stroke();
-      g.globalAlpha = 1;
     }
   }
 
