@@ -3687,15 +3687,16 @@ function drawAltTape(){
     const vDistToCeil  = Math.abs(aft - as.t);
     const vDist = Math.min(vDistToFloor, vDistToCeil);
     const isInside = aft >= as.b && aft <= as.t;
-    // Unified alert: forward proximity drives red/yellow (same as compass tape)
-    // Vertical proximity intensifies flash rate
+    // Alert: is airspace within vertical proximity? Then check forward proximity.
     const _fwdNm = hit.nearestNm;
     const _fwdSpd = simMode ? simSpeedKt : ac.speedKt;
     const _effNm = Math.max(0, _fwdNm - horizBufferNm);
     const _secTo = (_fwdSpd > 5) ? (_effNm / _fwdSpd) * 3600 : Infinity;
-    const bandIsRed = !isInside && (_effNm <= warnRedNm || _secTo <= warnRedSec);
-    const bandIsYellow = !bandIsRed && !isInside && (_effNm <= warnYelNm || _secTo <= warnYelSec);
-    const vertClose = !isInside && vDist <= warnVertFt;
+    // RED: within vertical proximity AND within 1nm laterally
+    const vertInProx = !isInside && vDist <= warnVertFt;
+    const bandIsRed = vertInProx && _effNm <= 1.0;
+    // YELLOW: forward airspace within 2nm or 1 minute
+    const bandIsYellow = !bandIsRed && !isInside && (_effNm <= 2.0 || _secTo <= 60);
     const pri = bandIsRed ? 2 : bandIsYellow ? 1 : 0;
 
     // Clamp actual region for drawing
@@ -3742,25 +3743,20 @@ function drawAltTape(){
     h.globalAlpha = 1.0;
   }
 
-  // Pass 2: Flashing alerts ON TOP of all base bars
-  // Vertical proximity intensifies: faster flash + higher opacity
+  // Pass 2: Flashing alerts ON TOP of all base bars (same flash rate everywhere)
   for(const band of altBands){
-    const {clampTop, clampBot, bandIsRed, bandIsYellow, vertClose} = band;
+    const {clampTop, clampBot, bandIsRed, bandIsYellow} = band;
     if(bandIsRed){
-      const rate = vertClose ? 150 : 250; // faster flash when vertically close
-      const alpha = vertClose ? 0.85 : 0.75;
-      const show = alertFlashOn ? (Math.floor(now / rate) % 2 === 0) : true;
+      const show = alertFlashOn ? (Math.floor(now / 250) % 2 === 0) : true;
       if(show){
-        h.fillStyle = C.RED; h.globalAlpha = alpha;
+        h.fillStyle = C.RED; h.globalAlpha = 0.75;
         h.fillRect(rx, clampTop, rw, clampBot - clampTop);
         h.globalAlpha = 1.0;
       }
     } else if(bandIsYellow){
-      const rate = vertClose ? 300 : 500;
-      const alpha = vertClose ? 0.80 : 0.75;
-      const show = alertFlashOn ? (Math.floor(now / rate) % 2 === 0) : true;
+      const show = alertFlashOn ? (Math.floor(now / 500) % 2 === 0) : true;
       if(show){
-        h.fillStyle = C.YEL; h.globalAlpha = alpha;
+        h.fillStyle = C.YEL; h.globalAlpha = 0.75;
         h.fillRect(rx, clampTop, rw, clampBot - clampTop);
         h.globalAlpha = 1.0;
       }
@@ -4385,17 +4381,18 @@ function drawHdgTape(){
   for(const a of _cc.airspaces){
     const effNm = Math.max(0, a.nearestNm - horizBufferNm);
     const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
-    let isR = (effNm <= warnRedNm || secTo <= warnRedSec);
-    let isY = !isR && (effNm <= warnYelNm || secTo <= warnYelSec);
+    // ── Alert logic ──
+    // RED: airspace (including buffer) within 1nm laterally on either side
+    const isR = a.nearestNm <= 1.0;
+    // YELLOW: forward airspace within 2nm or 1 minute
+    const fwdYelDist = effNm <= 2.0;
+    const fwdYelTime = secTo <= 60;
+    const isY = !isR && (fwdYelDist || fwdYelTime);
+    // Show bar if within any threshold
     const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
-
-    // Buffer bars (tier 2) are inherently yellow caution — you're in the buffer zone
-    if(a.tier === 2 && !isR){
-      isY = true;
-    }
-
     if(!isR && !isY && !isW) continue;
 
+    // Escape direction: chevrons point away from airspace center (heading to turn to get clear)
     const escMid = ((a.lo + a.hi) / 2) % 360;
     let diffC = escMid - a.centerBrg;
     if(diffC > 180) diffC -= 360; if(diffC < -180) diffC += 360;
@@ -4409,9 +4406,8 @@ function drawHdgTape(){
       const x2 = cx + hi * PX_PER_DEG;
       const bw = Math.max(x2 - x1, 2) + 1;
       const bx = x1 - 0.5;
-      // Chevron bars only draw in front if aircraft is laterally inside the buffer (nearestNm <= horizBufferNm)
       const inBufLateral = a.tier === 2 && a.nearestNm <= horizBufferNm;
-      const drawInFront = a.tier === 1 ? (isR||isY) : inBufLateral;
+      const drawInFront = (isR || isY) || inBufLateral;
       hdgBarsAll.push({x:bx, w:bw, col:a.col, tier:a.tier, nearestNm:a.nearestNm, isR, isY, _alert:drawInFront, escDir});
     }
   }
