@@ -4408,7 +4408,10 @@ function drawHdgTape(){
       const x2 = cx + hi * PX_PER_DEG;
       const bw = Math.max(x2 - x1, 2) + 1;
       const bx = x1 - 0.5;
-      hdgBarsAll.push({x:bx, w:bw, col:a.col, tier:a.tier, nearestNm:a.nearestNm, isR, isY, _alert:isR||isY, escDir});
+      // Chevron bars only draw in front if aircraft is laterally inside the buffer (nearestNm <= horizBufferNm)
+      const inBufLateral = a.tier === 2 && a.nearestNm <= horizBufferNm;
+      const drawInFront = a.tier === 1 ? (isR||isY) : inBufLateral;
+      hdgBarsAll.push({x:bx, w:bw, col:a.col, tier:a.tier, nearestNm:a.nearestNm, isR, isY, _alert:drawInFront, escDir});
     }
   }
 
