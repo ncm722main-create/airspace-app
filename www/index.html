@@ -3712,22 +3712,20 @@ function drawAltTape(){
   // Draw order: alerts always on top. Within same alert level, closest on top.
   altBands.sort((a,b) => a.pri - b.pri || b.nearestNm - a.nearestNm);
 
+  // Pass 1: Draw all base bars
   for(const band of altBands){
-    const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
+    const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot} = band;
 
-    // Show solid actual airspace + hatched buffer altitudes above/below
     h.globalAlpha = 1.0;
     h.fillStyle = C.TAPE;
     h.fillRect(rx, clampTop, rw, clampBot - clampTop);
 
-    // ── Buffer zone ABOVE actual airspace (chevrons point up, away from solid) ──
     const bufAboveTop = Math.max(topY, yBufTop);
     const bufAboveBot = Math.min(botY, yActTop);
     if(bufAboveBot > bufAboveTop){
       hatchFillRect(h, rx, bufAboveTop, rw, bufAboveBot - bufAboveTop, col, 0.45, 'up');
     }
 
-    // ── Actual airspace region (solid) ──
     if(actClampBot > actClampTop){
       h.fillStyle = col;
       h.globalAlpha = 0.5;
@@ -3735,20 +3733,21 @@ function drawAltTape(){
       h.globalAlpha = 1.0;
     }
 
-    // ── Buffer zone BELOW actual airspace (chevrons point down, away from solid) ──
     const bufBelowTop = Math.max(topY, yActBot);
     const bufBelowBot = Math.min(botY, yBufBot);
     if(bufBelowBot > bufBelowTop){
       hatchFillRect(h, rx, bufBelowTop, rw, bufBelowBot - bufBelowTop, col, 0.45, 'down');
     }
 
-    // Border around full extent
     h.strokeStyle = col;
     h.lineWidth = 1;
     h.strokeRect(rx, clampTop, rw, clampBot - clampTop);
     h.globalAlpha = 1.0;
+  }
 
-    // Alert color overlay
+  // Pass 2: Flashing alerts ON TOP of all base bars
+  for(const band of altBands){
+    const {col, yActTop, yActBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
     if(bandIsRed){
       const show = alertFlashOn ? (Math.floor(now / 250) % 2 === 0) : true;
       if(show){
@@ -3764,8 +3763,11 @@ function drawAltTape(){
         h.globalAlpha = 1.0;
       }
     }
+  }
 
-    // Draw actual airspace floor/ceil edge lines (dashed)
+  // Pass 3: Edge lines on top of everything (dashed floor/ceiling markers)
+  for(const band of altBands){
+    const {col, yActTop, yActBot} = band;
     h.strokeStyle = col;
     h.lineWidth = 1.5;
     h.globalAlpha = 0.5;
