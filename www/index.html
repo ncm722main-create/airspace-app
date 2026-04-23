@@ -4382,9 +4382,15 @@ function drawHdgTape(){
   for(const a of _cc.airspaces){
     const effNm = Math.max(0, a.nearestNm - horizBufferNm);
     const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
-    const isR = (effNm <= warnRedNm || secTo <= warnRedSec);
-    const isY = !isR && (effNm <= warnYelNm || secTo <= warnYelSec);
+    let isR = (effNm <= warnRedNm || secTo <= warnRedSec);
+    let isY = !isR && (effNm <= warnYelNm || secTo <= warnYelSec);
     const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
+
+    // Buffer bars (tier 2) are inherently yellow caution — you're in the buffer zone
+    if(a.tier === 2 && !isR){
+      isY = true;
+    }
+
     if(!isR && !isY && !isW) continue;
 
     const escMid = ((a.lo + a.hi) / 2) % 360;
