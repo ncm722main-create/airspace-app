@@ -1422,8 +1422,7 @@ let warnRedNm    = 1.0;  // Alert: distance (nm)
 let warnRedSec   = 30;   // Alert: time (sec)
 let warnVertFt   = 500;  // Vertical alert (ft) — red
 let warnYelVertFt = 1000; // Vertical caution (ft) — yellow
-let warnYelVsFpm  = 500;  // VS caution threshold — |VS| > this → flashing yellow
-let warnRedVsFpm  = 1000; // VS alert threshold   — |VS| > this → flashing red
+// VS alert thresholds removed — VSI tape has no alerts
 let clearanceFt  = 500;  // Vertical clearance buffer (ft) — VS calcs target floor-buffer / ceil+buffer
 let horizBufferNm = 0.5; // Horizontal clearance buffer (nm) — heading/range alerts trigger earlier
 let radarRangeNm = 50;   // Radar sweep range (nm)
@@ -2222,8 +2221,7 @@ function updateWarnThresholds(){
   warnRedSec   = parseFloat(document.getElementById('wRedSec').value)  || 30;
   warnVertFt   = parseFloat(document.getElementById('wVertFt').value)  || 500;
   warnYelVertFt = parseFloat(document.getElementById('wYelVertFt').value) || 1000;
-  const _wYvs = document.getElementById('wYelVsFpm'); if(_wYvs) warnYelVsFpm = parseFloat(_wYvs.value) || 500;
-  const _wRvs = document.getElementById('wRedVsFpm'); if(_wRvs) warnRedVsFpm = parseFloat(_wRvs.value) || 1000;
+  // VS alert thresholds removed
   clearanceFt  = parseFloat(document.getElementById('wClearFt').value) || 500;
   const _wHb = document.getElementById('wHorizBuf'); if(_wHb) horizBufferNm = parseFloat(_wHb.value) || 0.5;
 }
@@ -3328,15 +3326,16 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
   const d = dir || 'up';
   ctx.save();
   ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
-  // Filled translucent background
+  // Solid class-color background
   ctx.fillStyle = hatchCol;
-  ctx.globalAlpha = (alpha != null) ? alpha * 0.35 : 0.16;
+  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
   ctx.fillRect(rx, ry, rw, rh);
-  // Repeating large chevrons densely packed like hatching
-  ctx.strokeStyle = hatchCol;
+  // Cut out transparent chevrons using destination-out
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.strokeStyle = 'rgba(0,0,0,1)';
   ctx.lineWidth = Math.max(2, Math.min(Math.max(rw, rh) * 0.1, 4));
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
+  ctx.globalAlpha = 0.7;
   const isVert = (d === 'up' || d === 'down');
   if(isVert){
     const aw = Math.min(rw * 0.7, 24); // full-width chevron
@@ -3376,6 +3375,7 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
       ctx.stroke();
     }
   }
+  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1; ctx.restore();
 }
 
@@ -3586,7 +3586,7 @@ function drawAltTape(){
   const _altCosLat = Math.cos(ac.lat * D2R);
   const _altSpd = simMode ? simSpeedKt : ac.speedKt;
   const _altProbeMax = Math.max(10, (_altSpd > 5) ? (_altSpd * 5 / 60) : 10);
-  const _altHdgR = (ac.hdg + lookOffset) * D2R;
+  const _altHdgR = ac.hdg * D2R;
   const _altCosH = Math.cos(_altHdgR), _altSinH = Math.sin(_altHdgR);
 
   if(!drawAltTape._cache) drawAltTape._cache = {hits:[], lastLat:0, lastLon:0, lastHdg:0, lastT:0};
@@ -3594,51 +3594,57 @@ function drawAltTape(){
   const _altNow = Date.now();
   const _altPosDelta = Math.abs(ac.lat - _altC.lastLat) + Math.abs(ac.lon - _altC.lastLon);
   const _altHdgDelta = Math.abs(ac.hdg - _altC.lastHdg);
-  // Force rebuild if cache has no hits but airspace data exists
-  const _altEmpty = _altC.hits.length === 0 && _nearbyAS.length > 0;
-  const _altStale = _altEmpty || (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
+  const _altStale = (_altNow - _altC.lastT) > 1500 || _altPosDelta > 0.002 || _altHdgDelta > 2;
   if(_altStale){
     _altC.lastLat=ac.lat; _altC.lastLon=ac.lon; _altC.lastHdg=ac.hdg; _altC.lastT=_altNow;
-    // Only show airspaces on the forward heading line or that we're currently inside.
     const hitSet = new Set();
-    const hitMeta = {}; // idx → {nearestNm, inside}
-    // Forward probe along exact heading line — only airspaces the heading intersects
-    for(let nm = 0.5; nm <= _altProbeMax; nm += 0.5){
-      const dd = (nm * 1852) / 111320;
-      const pLat = ac.lat + _altCosH * dd;
-      const pLon = ac.lon + _altSinH * dd / _altCosLat;
-      for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
-        const as = _nearbyAS[_ni];
-        const _i = as._idx;
-        if(hitSet.has(_i)) continue;
-        if(!asClassVisible[as.c]) continue;
-        if(as.c === 'E') continue;
-        if(pointInPoly(pLat, pLon, as.p)){
-          hitSet.add(_i);
-          hitMeta[_i] = {nearestNm: nm, inside: false};
-        }
-      }
-    }
-    // Also include airspaces we're currently inside (we're literally in them)
-    for(let _ni = 0; _ni < _nearbyAS.length; _ni++){
-      const as = _nearbyAS[_ni];
-      const _i = as._idx;
-      if(hitSet.has(_i)) continue;
+    const hitMeta = {}; // idx → {nearestNm}
+    // Include airspaces we're currently inside (on the heading line by definition)
+    for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
+      const as = AIRSPACE_DATA[_i];
       if(!asClassVisible[as.c]) continue;
       if(as.c === 'E') continue;
       if(pointInPolyAC(_i, as)){
         hitSet.add(_i);
-        hitMeta[_i] = {nearestNm: 0, inside: true};
+        hitMeta[_i] = {nearestNm: 0};
+        continue;
       }
     }
-    // Build hits list — forward probe already ensures only heading-line airspaces
+    // Forward probe along exact heading line
+    for(let nm = 0.5; nm <= _altProbeMax; nm += 0.5){
+      const dd = (nm * 1852) / 111320;
+      const pLat = ac.lat + _altCosH * dd;
+      const pLon = ac.lon + _altSinH * dd / _altCosLat;
+      for(let _i = 0; _i < AIRSPACE_DATA.length; _i++){
+        if(hitSet.has(_i)) continue;
+        const as = AIRSPACE_DATA[_i];
+        if(!asClassVisible[as.c]) continue;
+        if(as.c === 'E') continue;
+        if(pointInPoly(pLat, pLon, as.p)){
+          hitSet.add(_i);
+          hitMeta[_i] = {nearestNm: nm};
+        }
+      }
+    }
+    // Behind-aircraft filter: exclude airspaces entirely 0.1nm+ behind
     const hits = [];
     for(const _i of hitSet){
-      const fwdDist = hitMeta[_i].nearestNm;
-      hits.push({idx: _i, nearestNm: fwdDist, fwdDist});
+      const as = AIRSPACE_DATA[_i];
+      let maxFwd = -Infinity, minFwd = Infinity;
+      for(let vi = 0; vi < as.p.length; vi++){
+        const dN = (as.p[vi][0] - ac.lat) * 60;
+        const dE = (as.p[vi][1] - ac.lon) * 60 * _altCosLat;
+        const fwd = dN * _altCosH + dE * _altSinH;
+        if(fwd > maxFwd) maxFwd = fwd;
+        if(fwd < minFwd) minFwd = fwd;
+      }
+      if(maxFwd < 0) continue; // exclude anything behind aircraft
+      const fwdDist = Math.max(0, minFwd);
+      hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, fwdDist});
     }
-    hits.sort((a,b) => a.fwdDist - b.fwdDist);
-    _altC.hits = hits;
+    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
+    hits.sort((a,b) => a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
+    _altC.hits = hits.slice(0, 3);
   }
 
   for(const hit of _altC.hits){
@@ -3660,19 +3666,8 @@ function drawAltTape(){
     const vDistToCeil  = Math.abs(aft - as.t);
     const vDist = Math.min(vDistToFloor, vDistToCeil);
     const isInside = aft >= as.b && aft <= as.t;
-    // Alert based on forward horizontal proximity (same thresholds as compass tape + text alerts)
-    const _fwdNm = hit.nearestNm;
-    const _fwdSpd = simMode ? simSpeedKt : ac.speedKt;
-    const _effNm = Math.max(0, _fwdNm - horizBufferNm);
-    const _secTo = (_fwdSpd > 5) ? (_effNm / _fwdSpd) * 3600 : Infinity;
-    const fwdRed = !isInside && (_effNm <= warnRedNm || _secTo <= warnRedSec);
-    const fwdYel = !fwdRed && !isInside && (_effNm <= warnYelNm || _secTo <= warnYelSec);
-    // Also check vertical proximity
-    const vertRed = !isInside && vDist <= warnVertFt;
-    const vertYel = !vertRed && !isInside && vDist <= warnYelVertFt;
-    // Alert if EITHER forward or vertical threshold is met
-    const bandIsRed = fwdRed || vertRed;
-    const bandIsYellow = !bandIsRed && (fwdYel || vertYel);
+    const bandIsRed = !isInside && vDist <= warnVertFt;
+    const bandIsYellow = !bandIsRed && !isInside && vDist <= warnYelVertFt;
     const pri = bandIsRed ? 2 : bandIsYellow ? 1 : 0;
 
     // Clamp actual region for drawing
@@ -3682,23 +3677,25 @@ function drawAltTape(){
     altBands.push({col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow, pri});
   }
 
-  // Sort by altitude position (lowest floor first)
-  altBands.sort((a,b) => a.yActBot - b.yActBot);
+  // Sort by altitude position (lowest floor first) so bars render in order; within same altitude, alerts on top
+  altBands.sort((a,b) => a.yActBot - b.yActBot || a.pri - b.pri);
 
-  // Pass 1: Draw all base bars (airspace color + buffer hatching + borders)
   for(const band of altBands){
-    const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot} = band;
+    const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
 
+    // Show solid actual airspace + hatched buffer altitudes above/below
     h.globalAlpha = 1.0;
     h.fillStyle = C.TAPE;
     h.fillRect(rx, clampTop, rw, clampBot - clampTop);
 
+    // ── Buffer zone ABOVE actual airspace (chevrons point up, away from solid) ──
     const bufAboveTop = Math.max(topY, yBufTop);
     const bufAboveBot = Math.min(botY, yActTop);
     if(bufAboveBot > bufAboveTop){
       hatchFillRect(h, rx, bufAboveTop, rw, bufAboveBot - bufAboveTop, col, 0.45, 'up');
     }
 
+    // ── Actual airspace region (solid) ──
     if(actClampBot > actClampTop){
       h.fillStyle = col;
       h.globalAlpha = 0.5;
@@ -3706,21 +3703,20 @@ function drawAltTape(){
       h.globalAlpha = 1.0;
     }
 
+    // ── Buffer zone BELOW actual airspace (chevrons point down, away from solid) ──
     const bufBelowTop = Math.max(topY, yActBot);
     const bufBelowBot = Math.min(botY, yBufBot);
     if(bufBelowBot > bufBelowTop){
       hatchFillRect(h, rx, bufBelowTop, rw, bufBelowBot - bufBelowTop, col, 0.45, 'down');
     }
 
+    // Border around full extent
     h.strokeStyle = col;
     h.lineWidth = 1;
     h.strokeRect(rx, clampTop, rw, clampBot - clampTop);
     h.globalAlpha = 1.0;
-  }
 
-  // Pass 2: Draw all alert overlays ON TOP + edge lines
-  for(const band of altBands){
-    const {col, yActTop, yActBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
+    // Alert color overlay
     if(bandIsRed){
       const show = alertFlashOn ? (Math.floor(now / 250) % 2 === 0) : true;
       if(show){
@@ -3851,9 +3847,8 @@ function drawAltTape(){
         const distDeg = (nm*1852)/111320;
         const pLat = ac.lat + Math.cos(_fwdHdgR)*distDeg;
         const pLon = ac.lon + Math.sin(_fwdHdgR)*distDeg/_fwdCosLat;
-        for(let _ni=0; _ni<_nearbyAS.length; _ni++){
-          const as = _nearbyAS[_ni];
-          const _fi = as._idx;
+        for(let _fi=0; _fi<AIRSPACE_DATA.length; _fi++){
+          const as = AIRSPACE_DATA[_fi];
           if(!asClassVisible[as.c]) continue;
           if(as.t + clearanceFt < scanBotFt || as.b - clearanceFt > scanTopFt) continue;
           if(pointInPolyAC(_fi, as) && aft >= as.b && aft <= as.t) continue;
@@ -4168,177 +4163,256 @@ function drawHdgTape(){
   const hdgBars = []; // {x, w, col, isRed, isYellow, pri}
 
   // --- Compass: 3-tier priority system ---
-  // ── Heading tape bars — mirrors compass rose logic exactly ──
-  // At-altitude, not inside, occlusion (nearest wins), class color 0.5, alert overlay, white edge lines.
+  // Tier 1 (solid): actual airspace at same altitude
+  // Tier 2 (hatched L/R): horizontal buffer of same-altitude airspace (only if no actual at that degree)
+  // Tier 3 (hatched L/R): buffer-altitude airspace (only if nothing else at that degree)
+  // Chevrons point left/right to indicate escape direction.
   const _hdgSpd = simMode ? simSpeedKt : ac.speedKt;
-  if(!drawHdgTape._cache) drawHdgTape._cache = {arcs:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
+  if(!drawHdgTape._cache) drawHdgTape._cache = {airspaces:[], lastLat:0, lastLon:0, lastAft:0, lastSpd:0, lastHdg:0, lastT:0};
   const _cc = drawHdgTape._cache;
   const _cNow = Date.now();
-  const _ccEmpty = _cc.arcs.length === 0 && _nearbyAS.length > 0;
-  const _stale = _ccEmpty || (_cNow - _cc.lastT) > 1500 || Math.abs(ac.lat-_cc.lastLat)+Math.abs(ac.lon-_cc.lastLon) > 0.002
-    || Math.abs(aft-_cc.lastAft) > 50 || Math.abs(_hdgSpd-_cc.lastSpd) > 5 || Math.abs(hdg-_cc.lastHdg) > 2;
+  const _posDelta = Math.abs(ac.lat - _cc.lastLat) + Math.abs(ac.lon - _cc.lastLon);
+  const _altDelta = Math.abs(aft - _cc.lastAft);
+  const _spdDelta = Math.abs(_hdgSpd - _cc.lastSpd);
+  const _hdgDelta = Math.abs(hdg - _cc.lastHdg);
+  const _stale = (_cNow - _cc.lastT) > 1500 || _posDelta > 0.002 || _altDelta > 50 || _spdDelta > 5 || _hdgDelta > 2;
   if(_stale){
     _cc.lastLat=ac.lat; _cc.lastLon=ac.lon; _cc.lastAft=aft; _cc.lastSpd=_hdgSpd; _cc.lastHdg=hdg; _cc.lastT=_cNow;
-    // Build candidates — at-altitude, not inside, with bearing intervals + nearest distance
-    const htCand = [];
-    for(let _ni=0; _ni<_nearbyAS.length; _ni++){
-      const as = _nearbyAS[_ni];
+    const MAX_NM = Math.max(10, (_hdgSpd > 5) ? (_hdgSpd * 5 / 60) : 10);
+    // Build candidates — same altitude + buffer altitude
+    // Per-airspace logic: actual same-alt → solid; any buffer → hatched
+    const cand = [];
+    for(let ai = 0; ai < AIRSPACE_DATA.length; ai++){
+      const as = AIRSPACE_DATA[ai];
       if(!asClassVisible[as.c]) continue;
+      // Only show airspaces at current altitude — compass guides horizontal escape
       if(aft < as.b || aft > as.t) continue;
-      if(pointInPolyAC(as._idx, as)) continue;
-      const brgs2 = [];
-      let near2 = Infinity;
-      for(const p of as.p){
-        const dLat2=(p[0]-ac.lat)*60, dLon2=(p[1]-ac.lon)*60*cosLat;
-        const nm2=Math.sqrt(dLat2*dLat2+dLon2*dLon2);
-        if(nm2<near2) near2=nm2;
-        let brg2=Math.atan2((p[1]-ac.lon)*cosLat, p[0]-ac.lat)*180/Math.PI;
-        if(brg2<0) brg2+=360;
-        brgs2.push(brg2);
+      const atSameAlt = true;
+      if(pointInPolyAC(ai, as)) continue; // inside — skip
+      // Skip airspaces entirely behind the aircraft
+      const _cHdgR = hdg * D2R;
+      const _cCosH = Math.cos(_cHdgR), _cSinH = Math.sin(_cHdgR);
+      let _cMaxFwd = -Infinity, _cMinFwd = Infinity;
+      for(let vi=0;vi<as.p.length;vi++){
+        const dN = (as.p[vi][0] - ac.lat) * 60;
+        const dE = (as.p[vi][1] - ac.lon) * 60 * cosLat;
+        const fwd = dN * _cCosH + dE * _cSinH;
+        if(fwd > _cMaxFwd) _cMaxFwd = fwd;
+        if(fwd < _cMinFwd) _cMinFwd = fwd;
       }
-      if(!brgs2.length) continue;
-      const sorted2=brgs2.slice().sort((a,b)=>a-b);
-      const bMin2=sorted2[0], bMax2=sorted2[sorted2.length-1];
-      const ivs2=[];
-      if(bMax2-bMin2>180){
-        let gs2=bMax2, ge2=bMin2+360, gsz2=ge2-gs2;
-        for(let i=0;i<sorted2.length-1;i++){const g3=sorted2[i+1]-sorted2[i];if(g3>gsz2){gsz2=g3;gs2=sorted2[i];ge2=sorted2[i+1];}}
-        if(ge2>gs2&&ge2<=360){ivs2.push({lo:ge2,hi:360});ivs2.push({lo:0,hi:gs2});}
-        else ivs2.push({lo:ge2,hi:gs2});
-      } else { ivs2.push({lo:bMin2,hi:bMax2}); }
-      // Alert level
-      const effNm2=Math.max(0,near2-horizBufferNm);
-      const secTo2=(_hdgSpd>5)?(effNm2/_hdgSpd)*3600:Infinity;
-      const isRed2=(effNm2<=warnRedNm||secTo2<=warnRedSec);
-      const isYel2=!isRed2&&(effNm2<=warnYelNm||secTo2<=warnYelSec);
-      const pri2=isRed2?2:isYel2?1:0;
-      // Buffer intervals (expand by horizBufferNm angle, capped 8°)
-      const bufIvs2=[];
-      if(horizBufferNm>0 && near2>0.01){
-        const exp2=Math.min(8,Math.atan(horizBufferNm/near2)*180/Math.PI);
-        for(const iv of ivs2){let bl=iv.lo-exp2;if(bl<0)bl+=360;let bh=iv.hi+exp2;if(bh>360)bh-=360;bufIvs2.push({lo:bl,hi:bh});}
+      if(_cMaxFwd < 0) continue; // exclude anything behind aircraft
+      const _cFwdDist = Math.max(0, _cMinFwd); // how far ahead nearest edge is
+      const bearings = [];
+      let nearestNm = Infinity;
+      const np = as.p.length;
+      for(let vi=0;vi<np;vi++){
+        const vLat = as.p[vi][0], vLon = as.p[vi][1];
+        const dLatNmV = (vLat-ac.lat)*60;
+        const dLonNmV = (vLon-ac.lon)*60*cosLat;
+        const vNm = Math.sqrt(dLatNmV*dLatNmV + dLonNmV*dLonNmV);
+        if(vNm < nearestNm) nearestNm = vNm;
+        const dLat = vLat-ac.lat, dLon = (vLon-ac.lon)*cosLat;
+        let brg = Math.atan2(dLon, dLat) * 180/Math.PI;
+        if(brg<0) brg+=360;
+        bearings.push(brg);
+        const j = (vi+1) % np;
+        const ax = dLonNmV, ay = dLatNmV;
+        const bx = (as.p[j][1]-ac.lon)*60*cosLat;
+        const by = (as.p[j][0]-ac.lat)*60;
+        const ex = bx-ax, ey = by-ay;
+        const len2 = ex*ex + ey*ey;
+        let t = len2 > 1e-9 ? -(ax*ex + ay*ey)/len2 : 0;
+        if(t < 0) t = 0; else if(t > 1) t = 1;
+        const px = ax + t*ex, py = ay + t*ey;
+        const eNm = Math.sqrt(px*px + py*py);
+        if(eNm < nearestNm) nearestNm = eNm;
       }
-      htCand.push({intervals:ivs2, bufIntervals:bufIvs2, col:asCol(as.c), isRed:isRed2, isYellow:isYel2, pri:pri2, nearestNm:near2});
-    }
-    // Occlusion pass — nearest-first, 0.5° resolution
-    htCand.sort((a,b)=>a.nearestNm-b.nearestNm);
-    const STEPS=720;
-    const htOwner=new Array(STEPS);
-    const htTier=new Uint8Array(STEPS); // 1=actual, 2=buffer
-    // Pass 1: actual airspace
-    for(let b=0;b<STEPS;b++){
-      const deg=b*0.5;
-      for(const c of htCand){
-        let hit=false;
-        for(const iv of c.intervals){ if(deg>=iv.lo&&deg<=iv.hi){hit=true;break;} }
-        if(hit){htOwner[b]=c;htTier[b]=1;break;}
-      }
-    }
-    // Pass 2: buffer zones — only unclaimed degrees (no abutting airspace)
-    for(let b=0;b<STEPS;b++){
-      if(htTier[b]) continue; // already owned by actual airspace — no buffer here
-      const deg=b*0.5;
-      for(const c of htCand){
-        if(!c.bufIntervals.length) continue;
-        let inBuf=false;
-        for(const iv of c.bufIntervals){if(deg>=iv.lo&&deg<=iv.hi){inBuf=true;break;}}
-        if(!inBuf) continue;
-        // Skip if this degree is within the actual interval
-        let inAct=false;
-        for(const iv of c.intervals){if(deg>=iv.lo&&deg<=iv.hi){inAct=true;break;}}
-        if(inAct) continue;
-        htOwner[b]=c;htTier[b]=2;break;
-      }
-    }
-    // Collapse into contiguous arcs with tier + escape direction for buffers
-    const htArcs=[];
-    let htCur=null;
-    for(let b=0;b<=STEPS;b++){
-      const o=(b<STEPS)?htOwner[b]:null;
-      const t=(b<STEPS)?htTier[b]:0;
-      if(o&&htCur&&o===htCur.owner&&t===htCur.tier){htCur.hi=b*0.5;}
-      else{
-        if(htCur){
-          // For buffer bars, determine escape direction (away from actual airspace)
-          let escDir = 'right';
-          if(htCur.tier === 2 && htCur.owner.intervals.length > 0){
-            // Find center of actual airspace interval
-            const iv0 = htCur.owner.intervals[0];
-            let actCenter = (iv0.lo + iv0.hi) / 2;
-            let bufCenter = (htCur.lo + htCur.hi) / 2;
-            let diff = bufCenter - actCenter;
-            if(diff > 180) diff -= 360; if(diff < -180) diff += 360;
-            escDir = diff >= 0 ? 'right' : 'left'; // buffer is CW from actual → point right (away)
-          }
-          htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2, escDir});
+      if(nearestNm > MAX_NM) continue;
+      if(!bearings.length) continue;
+      const sorted = bearings.slice().sort((a,b)=>a-b);
+      const bMin = sorted[0], bMax = sorted[sorted.length-1];
+      const intervals = [];
+      if(bMax - bMin > 180){
+        let gapStart = bMax, gapEnd = bMin + 360, gapSize = gapEnd - gapStart;
+        for(let i=0;i<sorted.length-1;i++){
+          const g2 = sorted[i+1]-sorted[i];
+          if(g2>gapSize){ gapSize=g2; gapStart=sorted[i]; gapEnd=sorted[i+1]; }
         }
-        htCur=o?{owner:o,lo:b*0.5,hi:b*0.5,tier:t}:null;
+        if(gapEnd > gapStart){
+          intervals.push({lo:gapEnd, hi:360});
+          intervals.push({lo:0,      hi:gapStart});
+        } else {
+          intervals.push({lo:gapEnd, hi:gapStart});
+        }
+      } else {
+        intervals.push({lo:bMin, hi:bMax});
+      }
+      // Horizontal buffer-expanded intervals (only for same-altitude airspaces)
+      const bufIntervals = [];
+      if(atSameAlt && nearestNm > 0.01 && horizBufferNm > 0){
+        const expandDeg = Math.atan(horizBufferNm / nearestNm) * 180 / Math.PI;
+        for(const iv of intervals){
+          bufIntervals.push({
+            lo: ((iv.lo - expandDeg) % 360 + 360) % 360,
+            hi: ((iv.hi + expandDeg) % 360 + 360) % 360
+          });
+        }
+      }
+      // Compute center bearing of actual intervals for chevron direction
+      let _cbrg = 0;
+      if(intervals.length === 1){
+        _cbrg = (intervals[0].lo + intervals[0].hi) / 2;
+      } else if(intervals.length === 2){
+        const all = [];
+        for(const iv of intervals){ all.push(iv.lo); all.push(iv.hi); }
+        let sum = 0;
+        for(const a of all){ let d = a - all[0]; if(d < -180) d+=360; if(d>180) d-=360; sum+=d; }
+        _cbrg = ((all[0] + sum/all.length) % 360 + 360) % 360;
+      }
+      cand.push({as, col: asCol(as.c), intervals, bufIntervals, nearestNm, fwdDist: _cFwdDist, atSameAlt, centerBrg: _cbrg});
+    }
+    // Prioritize airspaces ahead first (by forward distance), then by nearest horizontal distance
+    cand.sort((a,b)=>a.fwdDist - b.fwdDist || a.nearestNm - b.nearestNm);
+    // Keep only top 3 closest airspaces
+    if(cand.length > 3) cand.length = 3;
+
+    // 2-pass degree scan — per-airspace priority:
+    // Pass 1 (solid): actual same-altitude airspace bearing → tier 1
+    // Pass 2 (hatched): any buffer (horiz buffer of same-alt OR buffer-altitude bearing) → tier 2
+    // Solid always overrides hatched at any degree.
+    const owner = new Array(360);
+    const tier = new Uint8Array(360);
+
+    // PASS 1: Actual same-altitude airspaces (solid) — highest priority
+    for(let b=0;b<360;b++){
+      for(const c of cand){
+        if(!c.atSameAlt) continue;
+        let hit = false;
+        for(const iv of c.intervals){
+          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ hit=true; break; } }
+          else { if(b >= iv.lo || b <= iv.hi){ hit=true; break; } }
+        }
+        if(hit){ owner[b] = c; tier[b] = 1; break; }
       }
     }
-    if(htCur){
-      let escDir = 'right';
-      if(htCur.tier === 2 && htCur.owner.intervals.length > 0){
-        const iv0 = htCur.owner.intervals[0];
-        let diff = ((htCur.lo+htCur.hi)/2) - ((iv0.lo+iv0.hi)/2);
-        if(diff > 180) diff -= 360; if(diff < -180) diff += 360;
-        escDir = diff >= 0 ? 'right' : 'left';
+    // PASS 2: Horizontal buffer of same-alt airspaces — only unclaimed degrees within ±60° of heading
+    for(let b=0;b<360;b++){
+      if(tier[b]) continue; // solid wins
+      let _brgOff = b - hdg; if(_brgOff > 180) _brgOff -= 360; if(_brgOff < -180) _brgOff += 360;
+      if(Math.abs(_brgOff) > 60) continue;
+      for(const c of cand){
+        if(!c.bufIntervals.length) continue;
+        let inBuf = false;
+        for(const iv of c.bufIntervals){
+          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inBuf=true; break; } }
+          else { if(b >= iv.lo || b <= iv.hi){ inBuf=true; break; } }
+        }
+        if(!inBuf) continue;
+        // Must NOT be in actual interval (those are solid in pass 1)
+        let inActual = false;
+        for(const iv of c.intervals){
+          if(iv.hi >= iv.lo){ if(b >= iv.lo && b <= iv.hi){ inActual=true; break; } }
+          else { if(b >= iv.lo || b <= iv.hi){ inActual=true; break; } }
+        }
+        if(inActual) continue;
+        owner[b] = c; tier[b] = 2; break;
       }
-      htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2, escDir});
     }
-    // Sort: buffer behind, then by priority
-    htArcs.sort((a,b)=>(a.isBuf?0:1)-(b.isBuf?0:1) || a.pri-b.pri);
-    _cc.arcs = htArcs;
+
+    // Collapse into contiguous bars with tier info
+    const out = [];
+    let cur = null;
+    for(let b=0;b<=360;b++){
+      const o = (b<360) ? owner[b] : null;
+      const t = (b<360) ? tier[b] : 0;
+      if(o && cur && o === cur.owner && t === cur.tier){
+        cur.hi = b + 1;
+      } else {
+        if(cur) out.push(cur);
+        cur = o ? {owner:o, col:o.col, lo:b, hi:b+1, nearestNm:o.nearestNm, tier:t, centerBrg:o.centerBrg} : null;
+      }
+    }
+    if(cur) out.push(cur);
+    _cc.airspaces = out;
   }
 
-  // Draw heading tape bars
+  // Alert tiering & drawing
+  const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
-  _screenFlashActive = false;
-
-  for(const arc of _cc.arcs){
+  const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
+  const yelFlash = alertFlashOn ? (Math.floor(nowF/500) % 2 === 0) : true;
+  const hdgSolid = [];
+  const hdgHatch = [];
+  const hdgOverlays = [];
+  for(const a of _cc.airspaces){
+    const effNm = Math.max(0, a.nearestNm - horizBufferNm);
+    const secTo = (_spdKt > 5) ? (effNm / _spdKt) * 3600 : Infinity;
+    const isR = (effNm <= warnRedNm   || secTo <= warnRedSec);
+    const isY = !isR && (effNm <= warnYelNm   || secTo <= warnYelSec);
+    const isW = !isR && !isY && (effNm <= warnWhiteNm || secTo <= warnWhiteSec);
+    if(!isR && !isY && !isW) continue;
+    // Escape direction for buffer bars: point away from the actual airspace center
+    // Bar center vs airspace center → if bar is clockwise from center, point right (away); else left
+    const barMidBrg = ((a.lo + a.hi) / 2) % 360;
+    let diffFromCenter = barMidBrg - a.centerBrg;
+    if(diffFromCenter > 180) diffFromCenter -= 360; if(diffFromCenter < -180) diffFromCenter += 360;
+    const escDir = (diffFromCenter >= 0) ? 'right' : 'left';
     for(const shift of [-360, 0, 360]){
-      const lo = arc.lo - hdg + shift;
-      const hi = arc.hi - hdg + shift;
+      const lo = a.lo - hdg + shift;
+      const hi = a.hi - hdg + shift;
       if(hi < -65 || lo > 65) continue;
       const x1 = cx + lo * PX_PER_DEG;
       const x2 = cx + hi * PX_PER_DEG;
       const bw = Math.max(x2-x1, 2) + 1;
       const bx = x1 - 0.5;
-
-      if(arc.isBuf){
-        // Buffer bar: same hatchFillRect as alt tape — chevrons point away from airspace
-        hatchFillRect(h, bx, barY, bw, barH, arc.col, 0.45, arc.escDir || 'right');
+      if(a.tier === 1){
+        // Tier 1: actual same-altitude — solid fill
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50});
       } else {
-        // Actual airspace bar: class color at 0.5
-        h.fillStyle = arc.col;
-        h.globalAlpha = 0.5;
-        h.fillRect(bx, barY, bw, barH);
-        h.globalAlpha = 1;
-
-        // Alert overlay
-        if(arc.isRed || arc.isYellow){
-          const show = alertFlashOn
-            ? (arc.isRed ? Math.floor(nowF/250)%2===0 : Math.floor(nowF/500)%2===0) : true;
-          if(show){
-            h.fillStyle = arc.isRed ? C.RED : C.YEL;
-            h.globalAlpha = 0.75;
-            h.fillRect(bx, barY, bw, barH);
-            h.globalAlpha = 1;
+        // Tier 2: buffer — chevrons indicating horizontal escape direction
+        if(a.owner.atSameAlt){
+          // Buffer of same-alt airspace — chevron pattern starts at airspace center,
+          // clipped to buffer bar bounds so chevrons emerge from the solid edge outward
+          const cRel = a.centerBrg - hdg + shift;
+          const centerX = cx + cRel * PX_PER_DEG;
+          let drawX, drawW;
+          if(escDir === 'right'){
+            drawX = Math.min(bx, centerX);
+            drawW = (bx + bw) - drawX;
+          } else {
+            drawX = bx;
+            drawW = Math.max(bx + bw, centerX) - bx;
           }
-          // Screen flash: alert crosses heading center
-          if(bx <= cx && (bx + bw) >= cx){
-            _screenFlashActive = true;
-            _screenFlashCol = arc.isRed ? C.RED : (_screenFlashCol === C.RED ? C.RED : C.YEL);
-          }
+          hdgHatch.push({x:drawX, w:drawW, clipX:bx, clipW:bw, col:a.col, dir:escDir});
         }
       }
-
-      // Edge lines — colored by alert state (red/yellow/white)
-      const edgeCol = arc.isRed ? C.RED : arc.isYellow ? C.YEL : '#fff';
-      h.fillStyle = edgeCol; h.globalAlpha = 0.7;
-      h.fillRect(bx, barY, 1, barH);
-      h.fillRect(bx + bw - 1, barY, 1, barH);
-      h.globalAlpha = 1;
+      if(isR || isY){
+        const show = isR ? redFlash : yelFlash;
+        if(show){
+          hdgOverlays.push({x:bx, w:bw, col:isR?C.RED:C.YEL, a:isR?0.70:0.60});
+        }
+      }
     }
+  }
+
+  // ── Draw: hatched first (clipped to buffer bounds), solid on top, then alert overlays ──
+  for(const bar of hdgHatch){
+    h.save();
+    h.beginPath();
+    h.rect(bar.clipX, barY, bar.clipW, barH);
+    h.clip();
+    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.dir);
+    h.restore();
+  }
+  for(const bar of hdgSolid){
+    h.fillStyle = bar.col; h.globalAlpha = bar.a;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  for(const bar of hdgOverlays){
+    h.fillStyle = bar.col; h.globalAlpha = bar.a;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
   }
 
   // ── Tick marks and labels (every 10°) ──
