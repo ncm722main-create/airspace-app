@@ -4369,9 +4369,11 @@ function drawHdgTape(){
     }
     if(cur) out.push(cur);
     _cc.airspaces = out;
+    _cc.cand = cand;
   }
 
-  // ── Draw occluded bars — each degree owned by nearest airspace (no bars behind others) ──
+  // ── Draw occluded bars directly — solid (tier 1) and buffer (tier 2) ──
+  // Both are already clipped by the occlusion pass (no bars behind other bars)
   const _spdKt = simMode ? simSpeedKt : ac.speedKt;
   const nowF = Date.now();
   const redFlash = alertFlashOn ? (Math.floor(nowF/250) % 2 === 0) : true;
