@@ -3718,9 +3718,9 @@ function drawAltTape(){
     h.globalAlpha = 1.0;
   }
 
-  // Pass 2: Draw all alert overlays ON TOP of everything
+  // Pass 2: Draw all alert overlays ON TOP + edge lines
   for(const band of altBands){
-    const {clampTop, clampBot, bandIsRed, bandIsYellow} = band;
+    const {col, yActTop, yActBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
     if(bandIsRed){
       const show = alertFlashOn ? (Math.floor(now / 250) % 2 === 0) : true;
       if(show){
