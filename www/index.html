@@ -3328,7 +3328,7 @@ function hatchFillRect(ctx, rx, ry, rw, rh, hatchCol, alpha, dir){
   ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
   // Class-colored background
   ctx.fillStyle = hatchCol;
-  ctx.globalAlpha = (alpha != null) ? alpha * 0.5 : 0.22;
+  ctx.globalAlpha = (alpha != null) ? alpha : 0.45;
   ctx.fillRect(rx, ry, rw, rh);
   // Dark tape-colored chevron arrows
   ctx.strokeStyle = C.TAPE;
