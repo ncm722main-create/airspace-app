@@ -4401,7 +4401,7 @@ function drawHdgTape(){
       const bx = x1 - 0.5;
       if(a.tier === 1){
         // Tier 1: actual same-altitude — solid fill
-        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, nearestNm:a.nearestNm});
+        hdgSolid.push({x:bx, w:bw, col:a.col, a:0.50, nearestNm:a.nearestNm, _alert:isR||isY});
       } else {
         // Tier 2: buffer — chevrons indicating horizontal escape direction
         if(a.owner.atSameAlt){
@@ -4429,9 +4429,12 @@ function drawHdgTape(){
     }
   }
 
-  // ── Draw: farthest first, closest on top. Buffer behind solid, alerts on top of all. ──
+  // ── Draw: farthest first, closest on top. Alert bars always on top of non-alert bars. ──
   hdgHatch.sort((a,b) => b.nearestNm - a.nearestNm);
   hdgSolid.sort((a,b) => b.nearestNm - a.nearestNm);
+  // Split: non-alert bars first, then alert bars on top
+  const hdgSolidBase = hdgSolid.filter(b => !b._alert);
+  const hdgSolidAlert = hdgSolid.filter(b => b._alert);
   for(const bar of hdgHatch){
     h.save();
     h.beginPath();
@@ -4445,11 +4448,19 @@ function drawHdgTape(){
     h.beginPath(); h.moveTo(bar.clipX + bar.clipW, barY); h.lineTo(bar.clipX + bar.clipW, barY + barH); h.stroke();
     h.globalAlpha = 1;
   }
-  for(const bar of hdgSolid){
+  // Non-alert solid bars
+  for(const bar of hdgSolidBase){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
   }
+  // Alert solid bars on top of non-alert
+  for(const bar of hdgSolidAlert){
+    h.fillStyle = bar.col; h.globalAlpha = bar.a;
+    h.fillRect(bar.x, barY, bar.w, barH);
+    h.globalAlpha = 1;
+  }
+  // Alert overlays (flashing red/yellow) on top of everything
   for(const bar of hdgOverlays){
     h.fillStyle = bar.col; h.globalAlpha = bar.a;
     h.fillRect(bar.x, barY, bar.w, barH);
