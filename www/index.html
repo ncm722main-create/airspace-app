@@ -6091,19 +6091,37 @@ function drawBirdsEye(){
     roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm});
   }
 
-  // Show ALL bars — no occlusion. Sort farthest-first so closest draws on top.
-  roseCand.sort((a,b)=>b.nearestNm - a.nearestNm); // farthest first → closest last (on top)
+  // Show ALL bars — no occlusion.
+  // Sort: farthest first, closest last (on top).
+  // Within same distance tier, bars near current heading draw on top of side bars.
+  roseCand.sort((a,b)=>b.nearestNm - a.nearestNm);
   for(const c of roseCand){
     for(const iv of c.intervals){
+      // Compute how close this arc's center is to current heading (0°=straight ahead)
+      let midBrg = ((iv.lo + iv.hi) / 2) - hdg;
+      while(midBrg > 180) midBrg -= 360;
+      while(midBrg < -180) midBrg += 360;
+      const fwdDist = Math.abs(midBrg); // 0=dead ahead, 180=behind
       roseArcs.push({
         startDeg: iv.lo - hdg,
         endDeg:   iv.hi - hdg,
         col: c.col,
         isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
-        nearestNm: c.nearestNm
+        nearestNm: c.nearestNm,
+        fwdDist
       });
     }
   }
+  // Final draw order: side bars first, forward bars last (on top)
+  // Within same fwdDist group, farther distance first, closest last
+  roseArcs.sort((a,b) => {
+    // Primary: bars off to the side draw first (behind)
+    // Secondary: farther bars draw first (behind)
+    const fwdA = a.fwdDist <= 30 ? 1 : 0; // forward = within ±30° of heading
+    const fwdB = b.fwdDist <= 30 ? 1 : 0;
+    if(fwdA !== fwdB) return fwdA - fwdB; // side (0) before forward (1)
+    return b.nearestNm - a.nearestNm;      // farther before closer
+  });
 
   // ── Airport dots (inside rose) ──
   if(showAirports){
@@ -6157,7 +6175,7 @@ function drawBirdsEye(){
   g.restore(); // end circle clip
 
   // ── Compass rose edge: alert arc bars (drawn outside clip, on the band) ──
-  // Already sorted farthest-first so closest draws on top
+  // Sorted: side bars behind, forward (±30° of heading) on top; closest on top within each group
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
