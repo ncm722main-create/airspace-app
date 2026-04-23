@@ -3635,13 +3635,36 @@ function drawAltTape(){
       const vDist = Math.min(Math.abs(aft - as.b), Math.abs(aft - as.t));
       hits.push({idx: _i, nearestNm: hitMeta[_i].nearestNm, src: hitMeta[_i].src, vDist});
     }
-    hits.sort((a,b) => {
-      // Vertical (above/below) first, then forward
-      if(a.src !== b.src) return a.src === 'vertical' ? -1 : 1;
-      // Within same source: closest first
-      return a.src === 'vertical' ? a.vDist - b.vDist : a.nearestNm - b.nearestNm;
-    });
-    _altC.hits = hits;
+    // Priority: closest above, closest below, then closest ahead
+    // Keep only the most important airspaces to avoid clutter
+    let closestAbove = null, closestBelow = null;
+    const fwdHits = [];
+    for(const h2 of hits){
+      const as2 = _nearbyAS.find(a => a._idx === h2.idx) || AIRSPACE_DATA[h2.idx];
+      if(h2.src === 'vertical'){
+        // Airspace is horizontally around us — check if above or below
+        if(as2.b > aft){ // floor is above us
+          if(!closestAbove || Math.abs(aft - as2.b) < Math.abs(aft - (AIRSPACE_DATA[closestAbove.idx]?.b||0)))
+            closestAbove = h2;
+        } else if(as2.t < aft){ // ceiling is below us
+          if(!closestBelow || Math.abs(aft - as2.t) < Math.abs(aft - (AIRSPACE_DATA[closestBelow.idx]?.t||99999)))
+            closestBelow = h2;
+        } else {
+          // We're vertically inside — always show
+          fwdHits.push(h2);
+        }
+      } else {
+        fwdHits.push(h2);
+      }
+    }
+    // Sort forward hits by distance (closest first)
+    fwdHits.sort((a,b) => a.nearestNm - b.nearestNm);
+    // Assemble: closest above + closest below + closest forward hits
+    const finalHits = [];
+    if(closestAbove) finalHits.push(closestAbove);
+    if(closestBelow) finalHits.push(closestBelow);
+    for(const fh of fwdHits) finalHits.push(fh);
+    _altC.hits = finalHits;
   }
 
   for(const hit of _altC.hits){
@@ -3686,8 +3709,8 @@ function drawAltTape(){
   }
 
   // Sort by altitude position (lowest floor first) so bars render in order; within same altitude, alerts on top
-  // Draw order: farthest first, closest on top (by nearest distance in any direction)
-  altBands.sort((a,b) => b.nearestNm - a.nearestNm);
+  // Draw order: alerts always on top. Within same alert level, closest on top.
+  altBands.sort((a,b) => a.pri - b.pri || b.nearestNm - a.nearestNm);
 
   for(const band of altBands){
     const {col, yActTop, yActBot, yBufTop, yBufBot, clampTop, clampBot, actClampTop, actClampBot, bandIsRed, bandIsYellow} = band;
@@ -3907,8 +3930,8 @@ function drawAltTape(){
           _fc.bands.push({actTopY, actBotY, bufTopY, bufBotY, col:bandCol, isRed, isYellow, pri, baseCol:asCol(as.c), horizBufOnly:hit.horizBufOnly, fwdNm:hit.nm});
         }
       }
-      // Draw order: farthest first, closest on top
-      _fc.bands.sort((a,b) => b.fwdNm - a.fwdNm);
+      // Draw order: alerts on top, closest on top within same alert level
+      _fc.bands.sort((a,b) => a.pri - b.pri || b.fwdNm - a.fwdNm);
     }
 
     // Draw forward airspace bands — solid only if heading directly at airspace AND
@@ -4404,9 +4427,7 @@ function drawHdgTape(){
     }
   }
 
-  // ── Draw: farthest first, closest on top ──
-  hdgHatch.sort((a,b) => b.nearestNm - a.nearestNm);
-  hdgSolid.sort((a,b) => b.nearestNm - a.nearestNm);
+  // ── Draw: buffer behind solid, alerts always on top, closest on top within same level ──
   // Hatched (buffer) behind solid, then alert overlays on top of everything
   for(const bar of hdgHatch){
     h.save();
@@ -6148,8 +6169,8 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── Compass rose edge: alert arc bars — closest on top ──
-  roseArcs.sort((a,b) => b.nearestNm - a.nearestNm);
+  // ── Compass rose edge: alerts on top, closest on top within same level ──
+  roseArcs.sort((a,b) => a.pri - b.pri || b.nearestNm - a.nearestNm);
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
