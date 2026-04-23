@@ -3592,7 +3592,7 @@ function drawAltTape(){
   const _altCosLat = Math.cos(ac.lat * D2R);
   const _altSpd = simMode ? simSpeedKt : ac.speedKt;
   const _altProbeMax = Math.max(10, (_altSpd > 5) ? (_altSpd * 5 / 60) : 10);
-  const _altHdgR = ac.hdg * D2R;
+  const _altHdgR = (ac.hdg + lookOffset) * D2R;
   const _altCosH = Math.cos(_altHdgR), _altSinH = Math.sin(_altHdgR);
 
   if(!drawAltTape._cache) drawAltTape._cache = {hits:[], lastLat:0, lastLon:0, lastHdg:0, lastT:0};
@@ -3664,8 +3664,19 @@ function drawAltTape(){
     const vDistToCeil  = Math.abs(aft - as.t);
     const vDist = Math.min(vDistToFloor, vDistToCeil);
     const isInside = aft >= as.b && aft <= as.t;
-    const bandIsRed = !isInside && vDist <= warnVertFt;
-    const bandIsYellow = !bandIsRed && !isInside && vDist <= warnYelVertFt;
+    // Alert based on forward horizontal proximity (same thresholds as compass tape + text alerts)
+    const _fwdNm = hit.nearestNm;
+    const _fwdSpd = simMode ? simSpeedKt : ac.speedKt;
+    const _effNm = Math.max(0, _fwdNm - horizBufferNm);
+    const _secTo = (_fwdSpd > 5) ? (_effNm / _fwdSpd) * 3600 : Infinity;
+    const fwdRed = !isInside && (_effNm <= warnRedNm || _secTo <= warnRedSec);
+    const fwdYel = !fwdRed && !isInside && (_effNm <= warnYelNm || _secTo <= warnYelSec);
+    // Also check vertical proximity
+    const vertRed = !isInside && vDist <= warnVertFt;
+    const vertYel = !vertRed && !isInside && vDist <= warnYelVertFt;
+    // Alert if EITHER forward or vertical threshold is met
+    const bandIsRed = fwdRed || vertRed;
+    const bandIsYellow = !bandIsRed && (fwdYel || vertYel);
     const pri = bandIsRed ? 2 : bandIsYellow ? 1 : 0;
 
     // Clamp actual region for drawing
