@@ -6054,8 +6054,9 @@ function drawBirdsEye(){
       }
     }
 
-    // Compass rose edge arc — ALL airspaces get bars, closest on top.
+    // Compass rose edge arc — all airspaces at same altitude, closest on top.
     if(insideAs) continue; // skip bar if we're already inside it
+    if(!atAlt) continue;   // only show bars for airspaces at current altitude
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
