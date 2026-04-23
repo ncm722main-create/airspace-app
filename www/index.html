@@ -4250,7 +4250,7 @@ function drawHdgTape(){
         htOwner[b]=c;htTier[b]=2;break;
       }
     }
-    // Collapse into contiguous arcs with tier
+    // Collapse into contiguous arcs with tier + escape direction for buffers
     const htArcs=[];
     let htCur=null;
     for(let b=0;b<=STEPS;b++){
@@ -4258,11 +4258,33 @@ function drawHdgTape(){
       const t=(b<STEPS)?htTier[b]:0;
       if(o&&htCur&&o===htCur.owner&&t===htCur.tier){htCur.hi=b*0.5;}
       else{
-        if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2});
+        if(htCur){
+          // For buffer bars, determine escape direction (away from actual airspace)
+          let escDir = 'right';
+          if(htCur.tier === 2 && htCur.owner.intervals.length > 0){
+            // Find center of actual airspace interval
+            const iv0 = htCur.owner.intervals[0];
+            let actCenter = (iv0.lo + iv0.hi) / 2;
+            let bufCenter = (htCur.lo + htCur.hi) / 2;
+            let diff = bufCenter - actCenter;
+            if(diff > 180) diff -= 360; if(diff < -180) diff += 360;
+            escDir = diff >= 0 ? 'right' : 'left'; // buffer is CW from actual → point right (away)
+          }
+          htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2, escDir});
+        }
         htCur=o?{owner:o,lo:b*0.5,hi:b*0.5,tier:t}:null;
       }
     }
-    if(htCur) htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2});
+    if(htCur){
+      let escDir = 'right';
+      if(htCur.tier === 2 && htCur.owner.intervals.length > 0){
+        const iv0 = htCur.owner.intervals[0];
+        let diff = ((htCur.lo+htCur.hi)/2) - ((iv0.lo+iv0.hi)/2);
+        if(diff > 180) diff -= 360; if(diff < -180) diff += 360;
+        escDir = diff >= 0 ? 'right' : 'left';
+      }
+      htArcs.push({lo:htCur.lo, hi:htCur.hi, col:htCur.owner.col, isRed:htCur.owner.isRed, isYellow:htCur.owner.isYellow, pri:htCur.owner.pri, isBuf:htCur.tier===2, escDir});
+    }
     // Sort: buffer behind, then by priority
     htArcs.sort((a,b)=>(a.isBuf?0:1)-(b.isBuf?0:1) || a.pri-b.pri);
     _cc.arcs = htArcs;
@@ -4283,31 +4305,8 @@ function drawHdgTape(){
       const bx = x1 - 0.5;
 
       if(arc.isBuf){
-        // Buffer bar: white background with class-colored chevrons (inverted)
-        h.fillStyle = '#fff';
-        h.globalAlpha = 0.25;
-        h.fillRect(bx, barY, bw, barH);
-        h.globalAlpha = 1;
-        // Chevrons in class color
-        const chevSz = Math.min(barH * 0.3, 6);
-        const chevCount = Math.max(1, Math.round(bw / 10));
-        h.strokeStyle = arc.col;
-        h.lineWidth = 1.5;
-        h.globalAlpha = 0.8;
-        for(let ci=0; ci<chevCount; ci++){
-          const t2 = chevCount===1 ? 0.5 : ci/(chevCount-1);
-          const px = bx + bw * t2;
-          const midY = barY + barH/2;
-          // Point outward (away from airspace center — toward the actual bar edge)
-          const barCenter = bx + bw/2;
-          const dir = px < barCenter ? -1 : 1; // left side points left, right side points right
-          h.beginPath();
-          h.moveTo(px - dir*chevSz*0.4, midY - chevSz*0.4);
-          h.lineTo(px + dir*chevSz*0.4, midY);
-          h.lineTo(px - dir*chevSz*0.4, midY + chevSz*0.4);
-          h.stroke();
-        }
-        h.globalAlpha = 1;
+        // Buffer bar: same hatchFillRect as alt tape — chevrons point away from airspace
+        hatchFillRect(h, bx, barY, bw, barH, arc.col, 0.45, arc.escDir || 'right');
       } else {
         // Actual airspace bar: class color at 0.5
         h.fillStyle = arc.col;
