@@ -4419,42 +4419,29 @@ function drawHdgTape(){
     return b.nearestNm - a.nearestNm; // farthest behind
   });
 
-  // Check if any forward proximity alert is active
-  const hasForwardAlert = hdgBarsAll.some(b => b._alert && b.tier === 1);
-
-  // Pass 1: Non-alert solid bars (background)
+  // Pass 1: Non-alert solid bars (farthest first)
   for(const bar of hdgBarsAll){
     if(bar._alert || bar.tier === 2) continue;
     h.fillStyle = bar.col; h.globalAlpha = 0.50;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
   }
-  // Pass 2: Buffer/chevron bars — in front of solid bars unless forward alert overrides
-  if(!hasForwardAlert){
-    // No forward alert: chevrons show in front of all solid bars
-    for(const bar of hdgBarsAll){
-      if(bar.tier !== 2) continue;
-      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-    }
+  // Pass 2: Non-alert buffer chevrons
+  for(const bar of hdgBarsAll){
+    if(bar.tier !== 2 || bar._alert) continue;
+    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
   }
-  // Pass 3: Alert solid bars on top
+  // Pass 3: Alert solid bars on top of all non-alert
   for(const bar of hdgBarsAll){
     if(!bar._alert || bar.tier === 2) continue;
     h.fillStyle = bar.col; h.globalAlpha = 0.50;
     h.fillRect(bar.x, barY, bar.w, barH);
     h.globalAlpha = 1;
   }
-  // Pass 4: If forward alert active, chevrons draw behind the alert bars
-  if(hasForwardAlert){
-    for(const bar of hdgBarsAll){
-      if(bar.tier !== 2 || bar._alert) continue;
-      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-    }
-    // Alert chevrons on top of non-alert chevrons
-    for(const bar of hdgBarsAll){
-      if(bar.tier !== 2 || !bar._alert) continue;
-      hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
-    }
+  // Pass 4: Alert buffer chevrons on top of all other bars
+  for(const bar of hdgBarsAll){
+    if(bar.tier !== 2 || !bar._alert) continue;
+    hatchFillRect(h, bar.x, barY, bar.w, barH, bar.col, 0.45, bar.escDir);
   }
   // Pass 5: Flashing red/yellow overlays on top of everything
   for(const bar of hdgBarsAll){
