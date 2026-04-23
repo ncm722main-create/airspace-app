@@ -6046,10 +6046,11 @@ function drawBirdsEye(){
       }
     }
 
-    // Compass rose edge arc — show at-altitude airspaces + any airspace directly ahead
+    // ── Compass rose 3-layer threat ring ──
     if(insideAs) continue;
-    // Show bar if: at same altitude OR directly ahead (forward probe hit)
     if(!atAlt && fwdNm === Infinity) continue;
+
+    // Compute bearing span of this airspace
     const _brgs = [];
     let _nearestNm = Infinity;
     for(const p of as.p){
@@ -6057,9 +6058,7 @@ function drawBirdsEye(){
       const dLonNm = (p[1] - ac.lon) * 60 * cosLat;
       const nm = Math.sqrt(dLatNm*dLatNm + dLonNm*dLonNm);
       if(nm < _nearestNm) _nearestNm = nm;
-      const dLat = p[0] - ac.lat;
-      const dLon = (p[1] - ac.lon) * cosLat;
-      let brg = Math.atan2(dLon, dLat) * (180/Math.PI);
+      let brg = Math.atan2((p[1] - ac.lon) * cosLat, p[0] - ac.lat) * (180/Math.PI);
       if(brg < 0) brg += 360;
       _brgs.push(brg);
     }
@@ -6070,8 +6069,8 @@ function drawBirdsEye(){
     if(_bMax - _bMin > 180){
       let gapStart = _bMax, gapEnd = _bMin + 360, gapSize = gapEnd - gapStart;
       for(let i=0;i<_sorted.length-1;i++){
-        const g = _sorted[i+1] - _sorted[i];
-        if(g > gapSize){ gapSize = g; gapStart = _sorted[i]; gapEnd = _sorted[i+1]; }
+        const g2 = _sorted[i+1] - _sorted[i];
+        if(g2 > gapSize){ gapSize = g2; gapStart = _sorted[i]; gapEnd = _sorted[i+1]; }
       }
       if(gapEnd > gapStart && gapEnd <= 360){
         _ivs.push({lo: gapEnd, hi: 360});
@@ -6083,64 +6082,22 @@ function drawBirdsEye(){
       _ivs.push({lo: _bMin, hi: _bMax});
     }
 
-    // Horizontal buffer expansion — expand intervals by buffer angle (capped at 8°)
-    const _bufIvs = [];
-    if(horizBufferNm > 0 && _nearestNm > 0.01){
-      const bufExpand = Math.min(8, Math.atan(horizBufferNm / _nearestNm) * (180/Math.PI));
-      for(const iv of _ivs){
-        let bLo = iv.lo - bufExpand;
-        let bHi = iv.hi + bufExpand;
-        if(bLo < 0) bLo += 360;
-        if(bHi > 360) bHi -= 360;
-        _bufIvs.push({lo: bLo, hi: bHi});
-      }
-    }
+    // Threat level: 0=awareness, 1=caution(yellow), 2=warning(red)
+    const threat = isRed ? 2 : isYellow ? 1 : 0;
 
-    // Vertical buffer: chevrons for airspaces within ±500ft of aircraft
-    const altDiffFloor = Math.abs(aft - as.b);
-    const altDiffCeil  = Math.abs(aft - as.t);
-    const nearBuf = (altDiffFloor <= 500 || altDiffCeil <= 500);
-    let chevDir = null;
-    if(nearBuf){
-      if(aft <= as.b) chevDir = 'down';
-      else if(aft >= as.t) chevDir = 'up';
-      else chevDir = altDiffFloor < altDiffCeil ? 'down' : 'up';
-    }
-    // Is aircraft inside this airspace's horizontal buffer zone?
-    const inHorizBuf = (_nearestNm <= horizBufferNm);
-
-    // Push actual airspace bar
-    roseCand.push({intervals: _ivs, col, isRed, isYellow, pri, nearestNm: _nearestNm, nearBuf, chevDir, inHorizBuf, isBufBar: false});
-    // Push horizontal buffer bar (drawn behind actual)
-    if(_bufIvs.length > 0 && !inHorizBuf){
-      roseCand.push({intervals: _bufIvs, col, isRed: false, isYellow: false, pri: 0, nearestNm: _nearestNm + horizBufferNm, nearBuf, chevDir, inHorizBuf: false, isBufBar: true});
-    }
+    roseCand.push({intervals: _ivs, col, threat, nearestNm: _nearestNm, cls: as.c});
   }
 
-  // Sort: farthest first → closest last (on top). Forward bars on top of side bars.
-  roseCand.sort((a,b)=>b.nearestNm - a.nearestNm);
+  // ── Build roseArcs: single arc per interval with threat color ──
+  roseCand.sort((a,b) => b.nearestNm - a.nearestNm); // farthest first → closest on top
   for(const c of roseCand){
     for(const iv of c.intervals){
-      let midBrg = ((iv.lo + iv.hi) / 2) - hdg;
-      while(midBrg > 180) midBrg -= 360; while(midBrg < -180) midBrg += 360;
-      const fwdDist = Math.abs(midBrg);
       roseArcs.push({
         startDeg: iv.lo - hdg, endDeg: iv.hi - hdg,
-        col: c.col, isRed: c.isRed, isYellow: c.isYellow, pri: c.pri,
-        nearestNm: c.nearestNm, fwdDist,
-        nearBuf: c.nearBuf, chevDir: c.chevDir, inHorizBuf: c.inHorizBuf,
-        isBufBar: c.isBufBar || false
+        col: c.col, threat: c.threat, nearestNm: c.nearestNm, cls: c.cls
       });
     }
   }
-  // Draw order: buffer zone bars → inside-buffer bars → actual bars (closest on top)
-  roseArcs.sort((a,b) => {
-    // Layer 0: buffer zone bars (expanded outline) draw first
-    const layerA = a.isBufBar ? 0 : a.inHorizBuf ? 1 : 2;
-    const layerB = b.isBufBar ? 0 : b.inHorizBuf ? 1 : 2;
-    if(layerA !== layerB) return layerA - layerB;
-    return b.nearestNm - a.nearestNm;
-  });
 
   // ── Airport dots (inside rose) ──
   if(showAirports){
@@ -6193,62 +6150,70 @@ function drawBirdsEye(){
 
   g.restore(); // end circle clip
 
-  // ── Compass rose edge: alert arc bars (drawn outside clip, on the band) ──
-  // Sorted: side bars behind, forward (±30° of heading) on top; closest on top within each group
+  // ── 3-LAYER THREAT RING ──────────────────────────────────────
+  // Layer 1: Thin base ring — class color, low opacity (awareness)
+  // Layer 2: Thick alert band — yellow/red only where approaching (threat)
+  // Layer 3: Heading highlight — bright wedge at heading showing what's ahead
+
+  const thinW = Math.max(3, bandW * 0.35);  // thin awareness ring
+  const thickW = bandW;                       // full-width alert band
+
+  // LAYER 1: Thin class-color ring (all at-altitude airspace, low opacity)
   for(const arc of roseArcs){
     const a1 = (arc.startDeg - 90) * D2R;
     const a2 = (arc.endDeg - 90) * D2R;
-
-    // Base color arc (buffer zone bars drawn dimmer)
     g.beginPath();
     g.arc(cx, cy, roseR - bandW/2, a1, a2);
     g.strokeStyle = arc.col;
-    g.lineWidth = bandW;
-    g.globalAlpha = arc.isBufBar ? 0.2 : arc.inHorizBuf ? 0.3 : 0.5;
+    g.lineWidth = thinW;
+    g.globalAlpha = 0.35;
     g.stroke();
     g.globalAlpha = 1;
+  }
 
-    // Alert overlay
-    if(arc.isRed || arc.isYellow){
-      const show = alertFlashOn
-        ? (arc.isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
-      if(show){
-        g.beginPath();
-        g.arc(cx, cy, roseR - bandW/2, a1, a2);
-        g.strokeStyle = arc.isRed ? C.RED : C.YEL;
-        g.lineWidth = bandW;
-        g.globalAlpha = 0.75;
-        g.stroke();
-        g.globalAlpha = 1;
+  // LAYER 2: Thick alert band (only caution/warning arcs)
+  for(const arc of roseArcs){
+    if(arc.threat === 0) continue;
+    const a1 = (arc.startDeg - 90) * D2R;
+    const a2 = (arc.endDeg - 90) * D2R;
+    const isRed = arc.threat === 2;
+    const show = alertFlashOn
+      ? (isRed ? Math.floor(nowT/250)%2===0 : Math.floor(nowT/500)%2===0) : true;
+    if(!show) continue;
+    g.beginPath();
+    g.arc(cx, cy, roseR - bandW/2, a1, a2);
+    g.strokeStyle = isRed ? C.RED : C.YEL;
+    g.lineWidth = thickW;
+    g.globalAlpha = isRed ? 0.7 : 0.5;
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+
+  // LAYER 3: Heading highlight — bright wedge at 0° (straight ahead)
+  // Shows what class/threat is directly on your nose
+  {
+    const hdgHalfW = 4 * D2R; // ±4° wedge
+    const ha1 = -90 * D2R - hdgHalfW;
+    const ha2 = -90 * D2R + hdgHalfW;
+    // Find the most threatening arc that overlaps heading
+    let hdgThreat = 0, hdgCol = null;
+    for(const arc of roseArcs){
+      // Check if this arc spans across 0° (heading)
+      let lo = arc.startDeg, hi = arc.endDeg;
+      if(lo > hi) { const t = lo; lo = hi; hi = t; }
+      const coversHdg = (lo <= 0 && hi >= 0) || Math.min(Math.abs(lo), Math.abs(hi)) < 5;
+      if(coversHdg){
+        if(arc.threat > hdgThreat){ hdgThreat = arc.threat; hdgCol = arc.threat === 2 ? C.RED : arc.threat === 1 ? C.YEL : arc.col; }
+        if(hdgThreat === 0 && !hdgCol) hdgCol = arc.col;
       }
     }
-
-    // Chevrons for ±500ft vertical buffer — point toward clearance
-    if(arc.nearBuf && arc.chevDir){
-      const arcSpan = Math.abs(a2 - a1);
-      const chevCount = Math.max(1, Math.round(arcSpan / 0.25));
-      const chevR = roseR - bandW/2;
-      const chevSz = Math.min(bandW * 0.35, 5);
-      g.strokeStyle = '#fff';
-      g.lineWidth = 1.5;
-      g.globalAlpha = 0.9;
-      for(let ci = 0; ci < chevCount; ci++){
-        const t = chevCount === 1 ? 0.5 : ci / (chevCount - 1);
-        const ang = a1 + (a2 - a1) * t;
-        const px = cx + Math.cos(ang) * chevR;
-        const py = cy + Math.sin(ang) * chevR;
-        const radAng = Math.atan2(py - cy, px - cx);
-        const dir = arc.chevDir === 'up' ? 1 : -1;
-        const tipX = px + Math.cos(radAng) * chevSz * dir;
-        const tipY = py + Math.sin(radAng) * chevSz * dir;
-        const perpX = Math.cos(radAng + Math.PI/2) * chevSz * 0.6;
-        const perpY = Math.sin(radAng + Math.PI/2) * chevSz * 0.6;
-        g.beginPath();
-        g.moveTo(px - perpX - Math.cos(radAng)*chevSz*0.3*dir, py - perpY - Math.sin(radAng)*chevSz*0.3*dir);
-        g.lineTo(tipX, tipY);
-        g.lineTo(px + perpX - Math.cos(radAng)*chevSz*0.3*dir, py + perpY - Math.sin(radAng)*chevSz*0.3*dir);
-        g.stroke();
-      }
+    if(hdgCol){
+      g.beginPath();
+      g.arc(cx, cy, roseR - bandW/2, ha1, ha2);
+      g.strokeStyle = hdgCol;
+      g.lineWidth = thickW + 2;
+      g.globalAlpha = hdgThreat > 0 ? 0.9 : 0.6;
+      g.stroke();
       g.globalAlpha = 1;
     }
   }
